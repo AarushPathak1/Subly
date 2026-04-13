@@ -1,0 +1,19 @@
+{
+  "name": "subly-auth",
+  "version": "0.1.0",
+  "description": "Subly auth service — .edu verification via Clerk",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "@clerk/express": "^1.0.0",
+    "amqplib": "^0.10.4",
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

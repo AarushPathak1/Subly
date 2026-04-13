@@ -1,0 +1,25 @@
+# Env
+.env
+.env.local
+.env.example
+
+# Node
+node_modules/
+.next/
+dist/
+
+# Go
+*/vendor/
+**/*.test
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Docker
+*.log
+
+# OS
+.DS_Store
