@@ -69,6 +69,25 @@ app.post("/verify-edu", requireAuth(), async (req, res) => {
 });
 
 /**
+ * GET /validate
+ * Called by the Gateway to verify a Clerk session and return edu_verified status.
+ */
+app.get("/validate", requireAuth(), async (req, res) => {
+  const { userId } = getAuth(req);
+  try {
+    const { rows } = await db.query(
+      "SELECT id, clerk_id, edu_verified FROM users WHERE clerk_id = $1",
+      [userId]
+    );
+    if (!rows.length) return res.status(404).json({ error: "User not found" });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error("[auth] /validate error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * GET /me
  * Returns the current user's profile from our DB.
  */

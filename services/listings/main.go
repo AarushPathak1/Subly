@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -37,9 +38,10 @@ type Listing struct {
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 type server struct {
-	db      *pgxpool.Pool
-	mq      *amqp.Channel
-	mqQueue string
+	db         *pgxpool.Pool
+	mq         *amqp.Channel
+	mqQueue    string
+	mqNewQueue string
 }
 
 func (s *server) routes() http.Handler {
@@ -88,13 +90,18 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+
 	var body Listing
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 
-	// TODO: extract clerk_id from Authorization header and resolve to user_id
 	ctx := r.Context()
 	var id string
 	err := s.db.QueryRow(ctx,
@@ -104,7 +111,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		    amenities, images, status)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'draft')
 		 RETURNING id`,
-		body.UserID, body.Title, body.Description, body.Address, body.UniversityNear,
+		userID, body.Title, body.Description, body.Address, body.UniversityNear,
 		body.RentCents, body.AvailableFrom, body.AvailableTo,
 		body.Bedrooms, body.Bathrooms, body.Amenities, body.Images,
 	).Scan(&id)
@@ -113,8 +120,10 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Publish to scam-detection queue
+	body.ID = id
+	body.UserID = userID
 	s.publishScamCheck(id)
+	s.publishNewListing(body)
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
@@ -184,6 +193,21 @@ func (s *server) publishScamCheck(listingID string) {
 	}
 }
 
+func (s *server) publishNewListing(l Listing) {
+	if s.mq == nil {
+		return
+	}
+	payload, _ := json.Marshal(l)
+	err := s.mq.Publish("", s.mqNewQueue, false, false, amqp.Publishing{
+		ContentType:  "application/json",
+		DeliveryMode: amqp.Persistent,
+		Body:         payload,
+	})
+	if err != nil {
+		log.Printf("[listings] failed to publish new listing: %v", err)
+	}
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -215,10 +239,11 @@ func main() {
 	} else {
 		mqCh, _ = mqConn.Channel()
 		mqCh.QueueDeclare("listing.scam_check", true, false, false, false, nil)
+		mqCh.QueueDeclare("listings.new", true, false, false, false, nil)
 		defer mqConn.Close()
 	}
 
-	s := &server{db: db, mq: mqCh, mqQueue: "listing.scam_check"}
+	s := &server{db: db, mq: mqCh, mqQueue: "listing.scam_check", mqNewQueue: "listings.new"}
 
 	port := envOr("PORT", "3002")
 	srv := &http.Server{

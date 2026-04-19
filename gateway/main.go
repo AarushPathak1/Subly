@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -41,6 +42,59 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// authMiddleware validates the Clerk session via the auth service and injects X-User-ID.
+// Requests without a valid .edu-verified account are rejected before reaching the upstream.
+func authMiddleware(authServiceURL string, next http.Handler) http.Handler {
+	client := &http.Client{Timeout: 5 * time.Second}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := r.Header.Get("Authorization")
+		if token == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, authServiceURL+"/validate", nil)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+		req.Header.Set("Authorization", token)
+
+		resp, err := client.Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return
+		}
+		defer resp.Body.Close()
+
+		var user struct {
+			ID          string `json:"id"`
+			EduVerified bool   `json:"edu_verified"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+
+		if !user.EduVerified {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "edu_verification_required"})
+			return
+		}
+
+		r.Header.Set("X-User-ID", user.ID)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
 func main() {
 	authURL := mustParseURL(envOr("AUTH_SERVICE_URL", "http://auth:3001"))
 	listingsURL := mustParseURL(envOr("LISTINGS_SERVICE_URL", "http://listings:3002"))
@@ -62,7 +116,11 @@ func main() {
 	for _, rt := range routes {
 		prefix := rt.prefix
 		proxy := newReverseProxy(rt.upstream)
-		mux.Handle(prefix+"/", http.StripPrefix(prefix, proxy))
+		var h http.Handler = http.StripPrefix(prefix, proxy)
+		if prefix == "/api/listings" {
+			h = authMiddleware(authURL.String(), h)
+		}
+		mux.Handle(prefix+"/", h)
 	}
 
 	port := envOr("PORT", "8080")
