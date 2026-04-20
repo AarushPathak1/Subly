@@ -42,6 +42,20 @@ CREATE INDEX IF NOT EXISTS listings_user_id_idx ON listings(user_id);
 CREATE INDEX IF NOT EXISTS listings_status_idx  ON listings(status);
 CREATE INDEX IF NOT EXISTS listings_univ_idx    ON listings(university_near);
 
+-- ─── User Profiles ──────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_profiles (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id         UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    vibe_text       TEXT,                       -- freeform preference description
+    university      TEXT,                       -- target university / area
+    max_rent_cents  INT,                        -- upper rent budget in cents
+    min_bedrooms    SMALLINT DEFAULT 1,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS user_profiles_user_id_idx ON user_profiles(user_id);
+
 -- ─── Conversations ──────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS conversations (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -68,5 +82,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER users_updated_at    BEFORE UPDATE ON users    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER listings_updated_at BEFORE UPDATE ON listings FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER users_updated_at         BEFORE UPDATE ON users         FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER listings_updated_at      BEFORE UPDATE ON listings      FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER user_profiles_updated_at BEFORE UPDATE ON user_profiles FOR EACH ROW EXECUTE FUNCTION set_updated_at();
