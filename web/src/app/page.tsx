@@ -15,6 +15,9 @@ export default function Home() {
             </SignInButton>
           </SignedOut>
           <SignedIn>
+            <Link href="/dashboard" className="text-sm font-medium text-gray-600 hover:text-gray-900">
+              Dashboard
+            </Link>
             <Link href="/listings/new" className="text-sm font-medium text-indigo-600 hover:underline">
               Post a sublease
             </Link>

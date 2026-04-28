@@ -106,6 +106,62 @@ app.get("/me", requireAuth(), async (req, res) => {
   }
 });
 
+/**
+ * GET /profile
+ * Returns the current user's vibe preferences from user_profiles.
+ */
+app.get("/profile", requireAuth(), async (req, res) => {
+  const { userId } = getAuth(req);
+  try {
+    const { rows: userRows } = await db.query(
+      "SELECT id FROM users WHERE clerk_id = $1",
+      [userId]
+    );
+    if (!userRows.length) return res.status(404).json({ error: "User not found" });
+
+    const { rows } = await db.query(
+      `SELECT id, vibe_text, university, max_rent_cents, min_bedrooms
+       FROM user_profiles WHERE user_id = $1`,
+      [userRows[0].id]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Profile not found" });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error("[auth] /profile GET error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /profile
+ * Upserts vibe preferences for the current user.
+ */
+app.post("/profile", requireAuth(), async (req, res) => {
+  const { userId } = getAuth(req);
+  try {
+    const { rows: userRows } = await db.query(
+      "SELECT id FROM users WHERE clerk_id = $1",
+      [userId]
+    );
+    if (!userRows.length) return res.status(404).json({ error: "User not found" });
+
+    const { vibe_text, university, max_rent_cents, min_bedrooms } = req.body;
+    const { rows } = await db.query(
+      `INSERT INTO user_profiles (user_id, vibe_text, university, max_rent_cents, min_bedrooms)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id) DO UPDATE
+         SET vibe_text = $2, university = $3, max_rent_cents = $4,
+             min_bedrooms = $5, updated_at = NOW()
+       RETURNING id`,
+      [userRows[0].id, vibe_text, university, max_rent_cents, min_bedrooms]
+    );
+    res.json({ id: rows[0].id });
+  } catch (err) {
+    console.error("[auth] /profile POST error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function deriveUniversity(email) {
   const domain = email.split("@")[1] || "";
