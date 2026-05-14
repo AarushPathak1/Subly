@@ -1,4 +1,5 @@
 import { ClerkProvider } from "@clerk/nextjs";
+import { Toaster } from "sonner";
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -11,7 +12,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <ClerkProvider>
       <html lang="en">
-        <body>{children}</body>
+        <body>
+          {children}
+          <Toaster position="bottom-right" richColors />
+        </body>
       </html>
     </ClerkProvider>
   );
