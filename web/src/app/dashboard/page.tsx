@@ -12,6 +12,7 @@ interface MatchResult {
   rent_cents: number | null;
   bedrooms: number | null;
   bathrooms: number | null;
+  scam_score: number;
 }
 
 async function getMatches(userId: string, token: string): Promise<MatchResult[]> {
@@ -34,9 +35,10 @@ function MatchCard({ match }: { match: MatchResult }) {
   const baths = match.bathrooms ?? "–";
   const score = Math.round(match.score * 100);
   const university = match.university ?? "Unknown";
+  const isHighRisk = match.scam_score > 0.7;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-6 flex flex-col gap-3 hover:shadow-md transition">
+    <div className={`bg-white border rounded-2xl p-6 flex flex-col gap-3 hover:shadow-md transition ${isHighRisk ? "border-red-300" : "border-gray-200"}`}>
       <div className="flex items-start justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
           {university}
@@ -45,6 +47,15 @@ function MatchCard({ match }: { match: MatchResult }) {
           {score}% match
         </span>
       </div>
+
+      {isHighRisk && (
+        <div className="flex items-center gap-1.5 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+          <span className="text-xs font-semibold text-red-600">High Risk</span>
+          <span className="text-xs text-red-500 ml-1">— proceed with caution</span>
+        </div>
+      )}
+
       <p className="text-2xl font-bold text-gray-900">{rent}</p>
       <p className="text-sm text-gray-500">
         {beds} bed &middot; {baths} bath

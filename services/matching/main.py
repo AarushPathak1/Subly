@@ -1,7 +1,7 @@
 """
 Subly Matching Service
 FastAPI + Pinecone for vector-similarity listing search.
-Consumes listings.new (embedding pipeline) and listing.scam_check (scam pipeline).
+Consumes listings.new for embedding. Trust service owns listing.scam_check.
 """
 
 import asyncio
@@ -107,27 +107,6 @@ async def embed_listing_from_payload(listing: dict):
     log.info(f"Embedded listing {listing_id} from listings.new")
 
 
-async def consume_scam_queue():
-    """
-    Listens to listing.scam_check. Placeholder for future scam classifier;
-    re-embeds from DB so the vector index stays consistent on retries.
-    """
-    try:
-        conn = await aio_pika.connect_robust(os.environ["RABBITMQ_URL"])
-        channel = await conn.channel()
-        queue = await channel.declare_queue("listing.scam_check", durable=True)
-
-        async with queue.iterator() as q:
-            async for message in q:
-                async with message.process():
-                    data = json.loads(message.body)
-                    listing_id = data.get("listing_id")
-                    if listing_id:
-                        await embed_listing(listing_id)
-    except Exception as e:
-        log.warning(f"listing.scam_check consumer error (non-fatal): {e}")
-
-
 async def embed_listing(listing_id: str):
     """Fetch listing from DB and embed. Used by the scam-check pipeline and backfills."""
     cur = db_conn.cursor()
@@ -175,13 +154,9 @@ async def embed_listing(listing_id: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    tasks = [
-        asyncio.create_task(consume_new_listings()),
-        asyncio.create_task(consume_scam_queue()),
-    ]
+    task = asyncio.create_task(consume_new_listings())
     yield
-    for t in tasks:
-        t.cancel()
+    task.cancel()
 
 
 # ─── App ─────────────────────────────────────────────────────────────────────
@@ -208,6 +183,7 @@ class MatchResult(BaseModel):
     rent_cents: Optional[int] = None
     bedrooms: Optional[int] = None
     bathrooms: Optional[float] = None
+    scam_score: float = 0.0
 
 
 @app.get("/healthz")
@@ -261,6 +237,17 @@ def get_matches(user_id: str):
         include_metadata=True,
     )
 
+    # Batch-fetch scam_scores from Postgres so the frontend can show risk badges.
+    listing_ids = [m["id"] for m in results["matches"]]
+    scam_scores: dict[str, float] = {}
+    if listing_ids:
+        scam_cur = db_conn.cursor()
+        scam_cur.execute(
+            "SELECT id::text, scam_score FROM listings WHERE id = ANY(%s)",
+            (listing_ids,),
+        )
+        scam_scores = {row[0]: float(row[1]) for row in scam_cur.fetchall()}
+
     return [
         MatchResult(
             listing_id=m["id"],
@@ -269,6 +256,7 @@ def get_matches(user_id: str):
             rent_cents=m.get("metadata", {}).get("rent_cents"),
             bedrooms=m.get("metadata", {}).get("bedrooms"),
             bathrooms=m.get("metadata", {}).get("bathrooms"),
+            scam_score=scam_scores.get(m["id"], 0.0),
         )
         for m in results["matches"]
     ]

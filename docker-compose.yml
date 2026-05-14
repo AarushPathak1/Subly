@@ -149,6 +149,30 @@ services:
     networks:
       - subly-net
 
+  # ─── Trust Service (Python - scam detection worker) ───────────────────────
+
+  trust:
+    build:
+      context: ./services/trust
+      dockerfile: Dockerfile
+    container_name: subly-trust
+    restart: unless-stopped
+    ports:
+      - "3004:3004"
+    environment:
+      PORT: "3004"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-subly}:${POSTGRES_PASSWORD:-subly_secret}@postgres:5432/${POSTGRES_DB:-subly}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-subly}:${RABBITMQ_PASS:-subly_secret}@rabbitmq:5672"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ENV: ${ENV:-development}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - subly-net
+
   # ─── Web (Next.js) ─────────────────────────────────────────────────────────
 
   web:
