@@ -163,12 +163,7 @@ app.post("/profile", requireAuth(), async (req, res) => {
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-function deriveUniversity(email) {
-  const domain = email.split("@")[1] || "";
-  // e.g. "asu.edu" → "asu", "mail.utexas.edu" → "utexas"
-  const parts = domain.replace(/\.edu$/, "").split(".");
-  return parts[parts.length - 1].toUpperCase();
-}
+const { deriveUniversity } = require("./utils");
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;

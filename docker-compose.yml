@@ -20,7 +20,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-subly_secret}
       POSTGRES_DB: ${POSTGRES_DB:-subly}
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -187,6 +187,7 @@ services:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
       NEXT_PUBLIC_GATEWAY_URL: "http://localhost:8080"
+      GATEWAY_URL: "http://gateway:8080"
       NODE_ENV: ${ENV:-development}
     depends_on:
       - gateway

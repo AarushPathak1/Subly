@@ -1,0 +1,226 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI — Subly
+#
+# WHAT IS THIS FILE?
+# GitHub Actions reads every .yml file inside .github/workflows/ and turns it
+# into an automated pipeline. This file defines one workflow called "CI".
+#
+# WHEN DOES IT RUN?
+# The `on:` block below says: run on every push to main, AND on every pull
+# request that targets main. So every time you push code or open a PR, GitHub
+# automatically runs all these tests on fresh servers — no local setup needed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+# `on:` defines what events start this workflow.
+# push → fires when you push commits to main
+# pull_request → fires when you open or update a PR targeting main
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# ── Jobs ──────────────────────────────────────────────────────────────────────
+# A job is an isolated unit of work. Each job:
+#   - Gets a fresh virtual machine (the "runner")
+#   - Runs its steps in order
+#   - Is INDEPENDENT of other jobs (they run in parallel by default)
+#
+# We have one job per service so failures are scoped — a broken Python test
+# doesn't block the Go tests from running.
+jobs:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 1: Web (Next.js schema validation tests)
+  # ────────────────────────────────────────────────────────────────────────────
+  test-web:
+    # `runs-on` picks the operating system for this job's virtual machine.
+    # ubuntu-latest is the most common choice — fast, free, and Linux-native.
+    runs-on: ubuntu-latest
+
+    # `defaults` sets the working directory for every `run:` step in this job.
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      # Step 1: Check out your code onto the runner's filesystem.
+      # Without this, the VM has no code to work with.
+      # `actions/checkout@v4` is a pre-built action from GitHub's marketplace.
+      - uses: actions/checkout@v4
+
+      # Step 2: Install the correct version of Node.js.
+      # `cache: npm` tells GitHub to cache the node_modules folder between runs
+      # so you don't re-download 500 packages every time.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      # Step 3: Install dependencies (npm ci is like npm install but stricter —
+      # it uses the exact versions in package-lock.json, no surprises in CI).
+      - name: Install dependencies
+        run: npm ci
+
+      # Step 4: Run the tests.
+      - name: Run schema tests
+        run: npm test
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 2: Gateway (Go auth middleware tests)
+  # ────────────────────────────────────────────────────────────────────────────
+  test-gateway:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Go equivalent of setup-node. `cache: true` caches the module download cache.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      # `go test ./...` runs every test file in every package under this directory.
+      # -v = verbose output (show each test name)
+      # -count=1 = disable Go's test result caching so tests always re-run
+      - name: Run gateway tests
+        run: go test ./... -v -count=1
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 3: Listings service (Go — unit + integration tests)
+  #
+  # This job needs a real Postgres database. GitHub Actions supports `services:`
+  # which spins up Docker containers that run ALONGSIDE your job. The containers
+  # are available at `localhost` with the port you expose.
+  # ────────────────────────────────────────────────────────────────────────────
+  test-listings:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/listings
+
+    # `services:` starts Docker containers before your steps run.
+    # They're automatically stopped and removed after the job finishes.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: subly
+          POSTGRES_PASSWORD: subly_secret
+          POSTGRES_DB: subly
+        # health check: wait until Postgres is actually ready before steps run
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        # Map container port 5432 to host port 5432 so tests can reach it
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      # Run the init.sql schema script so the tables exist before tests run.
+      # PGPASSWORD is how psql accepts a password non-interactively.
+      - name: Apply database schema
+        run: |
+          PGPASSWORD=subly_secret psql \
+            -h localhost -U subly -d subly \
+            -f ../../infra/postgres/init.sql
+
+      # Pass DATABASE_URL as an env var so the integration tests can connect.
+      # RABBITMQ_URL is empty — integration tests that need it are skipped.
+      - name: Run listings tests
+        run: go test ./... -v -count=1
+        env:
+          DATABASE_URL: postgresql://subly:subly_secret@localhost:5432/subly
+          RABBITMQ_URL: ""
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 4: Matching service (Python — unit + mocked API tests)
+  # ────────────────────────────────────────────────────────────────────────────
+  test-matching:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/matching
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python equivalent of setup-node.
+      # `cache: pip` caches the pip download cache between runs.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: services/matching/requirements.txt
+
+      # Install the service's own dependencies plus test tools.
+      # pytest is the test runner; httpx is needed by FastAPI's TestClient.
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest httpx
+
+      # pytest discovers test files named test_*.py automatically.
+      # -v = verbose, --tb=short = shorter tracebacks on failure
+      - name: Run matching tests
+        run: pytest tests/ -v --tb=short
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 5: Trust service (Python — pure unit tests for scoring logic)
+  # ────────────────────────────────────────────────────────────────────────────
+  test-trust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/trust
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: services/trust/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run trust scoring tests
+        run: pytest tests/ -v --tb=short
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 6: Auth service (Node.js — unit tests for utility functions)
+  # ────────────────────────────────────────────────────────────────────────────
+  test-auth:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/auth
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: services/auth/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run auth unit tests
+        run: npm test

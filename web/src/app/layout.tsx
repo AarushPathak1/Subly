@@ -1,5 +1,6 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import { Toaster } from "sonner";
+import { CookieBanner } from "@/components/CookieBanner";
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <body>
           {children}
           <Toaster position="bottom-right" richColors />
+          <CookieBanner />
         </body>
       </html>
     </ClerkProvider>

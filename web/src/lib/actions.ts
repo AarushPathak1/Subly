@@ -11,7 +11,7 @@ import {
   ListingSchema,
 } from "@/lib/schemas";
 
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
+const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
 export type ActionState = { error: string } | { toast: string } | null;
 
