@@ -171,7 +171,34 @@ export default async function DashboardPage() {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
-  if (profileRes.status === 404) redirect("/onboarding");
+
+  if (profileRes.status === 404) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <AppNav active="dashboard" />
+        <div className="max-w-2xl mx-auto px-6 py-20 text-center">
+          <div className="bg-white border border-violet-100 rounded-2xl p-10 shadow-sm">
+            <div className="w-14 h-14 rounded-2xl bg-violet-50 flex items-center justify-center mx-auto mb-5">
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                <circle cx="14" cy="14" r="10" stroke="#7c3aed" strokeWidth="1.5" fill="#ede9fe"/>
+                <path d="M14 8v6l4 2" stroke="#7c3aed" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-slate-900 mb-2">Set up your preferences</h2>
+            <p className="text-sm text-slate-500 mb-7 leading-relaxed">
+              Tell us your vibe so our AI can find subleases that actually match what you're looking for.
+            </p>
+            <Link
+              href="/onboarding"
+              className="inline-block px-6 py-3 bg-violet-600 text-white text-sm font-semibold rounded-xl hover:bg-violet-700 transition"
+            >
+              Set up my preferences
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const matches = await getMatches(user.id, token!);
   const topScore = matches.length > 0 ? Math.round(matches[0].score * 100) : null;
