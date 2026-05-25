@@ -16,10 +16,19 @@ export default async function VerifyPage() {
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Minimal nav */}
       <nav className="bg-white border-b border-slate-100 px-6 py-3 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2.5">
-          <SublyLogo />
-          <span className="text-xl font-bold tracking-tight text-slate-900">Subly</span>
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/dashboard" className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Dashboard
+          </Link>
+          <div className="w-px h-4 bg-slate-200" />
+          <Link href="/" className="flex items-center gap-2">
+            <SublyLogo size={24} />
+            <span className="text-lg font-bold tracking-tight text-slate-900">Subly</span>
+          </Link>
+        </div>
         <span className="text-sm text-slate-500">Step 1 of 3 — Verify</span>
       </nav>
 
