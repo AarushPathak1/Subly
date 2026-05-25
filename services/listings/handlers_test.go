@@ -50,7 +50,7 @@ func TestHandleCreate_MissingUserID(t *testing.T) {
 func TestHandleCreate_BadJSON(t *testing.T) {
 	s := &server{}
 	req := httptest.NewRequest(http.MethodPost, "/listings", bytes.NewBufferString("not-json"))
-	req.Header.Set("X-User-ID", "user-1")
+	req.Header.Set("X-User-ID", "00000000-0000-0000-0000-000000000001")
 	w := httptest.NewRecorder()
 	s.handleCreate(w, req)
 
@@ -120,7 +120,7 @@ func TestIntegration_CreateAndGetListing(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	req := httptest.NewRequest(http.MethodPost, "/listings", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-ID", "test-user-id")
+	req.Header.Set("X-User-ID", "00000000-0000-0000-0000-000000000001")
 	w := httptest.NewRecorder()
 	s.handleCreate(w, req)
 
