@@ -4,7 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { AppNav } from "@/components/AppNav";
 
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
+const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
 interface MatchResult {
   listing_id: string;
