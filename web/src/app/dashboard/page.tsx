@@ -137,7 +137,9 @@ export default async function DashboardPage() {
   const token = await getToken();
 
   // Unverified users see the dashboard with a verification banner instead of a redirect loop
-  if (user && !user.edu_verified) {
+  // Show verification prompt for any signed-in user who isn't fully verified yet
+  // (covers both: user not in DB at all, or in DB but edu_verified=false)
+  if (!user || !user.edu_verified) {
     return (
       <div className="min-h-screen bg-slate-50">
         <AppNav active="dashboard" />
@@ -164,8 +166,6 @@ export default async function DashboardPage() {
       </div>
     );
   }
-
-  if (!user) redirect("/verify");
 
   const profileRes = await fetch(`${GATEWAY}/api/auth/profile`, {
     headers: { Authorization: `Bearer ${token}` },
