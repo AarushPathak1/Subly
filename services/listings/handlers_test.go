@@ -50,7 +50,7 @@ func TestHandleCreate_MissingUserID(t *testing.T) {
 func TestHandleCreate_BadJSON(t *testing.T) {
 	s := &server{}
 	req := httptest.NewRequest(http.MethodPost, "/listings", bytes.NewBufferString("not-json"))
-	req.Header.Set("X-User-ID", "00000000-0000-0000-0000-000000000001")
+	req.Header.Set("X-User-ID", testUserID)
 	w := httptest.NewRecorder()
 	s.handleCreate(w, req)
 
@@ -102,8 +102,27 @@ func requireDB(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+const testUserID = "00000000-0000-0000-0000-000000000001"
+
+func seedTestUser(t *testing.T, db *pgxpool.Pool) {
+	t.Helper()
+	_, err := db.Exec(context.Background(),
+		`INSERT INTO users (id, clerk_id, email, edu_verified)
+		 VALUES ($1, 'test-clerk-id', 'test@university.edu', true)
+		 ON CONFLICT (id) DO NOTHING`,
+		testUserID,
+	)
+	if err != nil {
+		t.Fatalf("could not seed test user: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec(context.Background(), "DELETE FROM users WHERE id = $1", testUserID)
+	})
+}
+
 func TestIntegration_CreateAndGetListing(t *testing.T) {
 	db := requireDB(t)
+	seedTestUser(t, db)
 	s := &server{db: db}
 
 	// Create a listing
@@ -121,7 +140,7 @@ func TestIntegration_CreateAndGetListing(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	req := httptest.NewRequest(http.MethodPost, "/listings", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-ID", "00000000-0000-0000-0000-000000000001")
+	req.Header.Set("X-User-ID", testUserID)
 	w := httptest.NewRecorder()
 	s.handleCreate(w, req)
 
