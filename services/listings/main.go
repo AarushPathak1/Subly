@@ -65,7 +65,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rows, err := s.db.Query(ctx,
 		`SELECT id, user_id, title, description, address, university_near,
-		        rent_cents, available_from, available_to, bedrooms, bathrooms,
+		        rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
 		        amenities, images, status, scam_score, created_at, updated_at
 		 FROM listings WHERE status = 'active' ORDER BY created_at DESC LIMIT 50`)
 	if err != nil {
@@ -137,7 +137,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	var l Listing
 	err := s.db.QueryRow(r.Context(),
 		`SELECT id, user_id, title, description, address, university_near,
-		        rent_cents, available_from, available_to, bedrooms, bathrooms,
+		        rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
 		        amenities, images, status, scam_score, created_at, updated_at
 		 FROM listings WHERE id = $1`, id,
 	).Scan(&l.ID, &l.UserID, &l.Title, &l.Description, &l.Address,
