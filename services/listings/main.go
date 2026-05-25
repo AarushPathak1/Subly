@@ -103,6 +103,10 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	var availableTo interface{}
+	if body.AvailableTo != "" {
+		availableTo = body.AvailableTo
+	}
 	var id string
 	err := s.db.QueryRow(ctx,
 		`INSERT INTO listings
@@ -112,7 +116,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'draft')
 		 RETURNING id`,
 		userID, body.Title, body.Description, body.Address, body.UniversityNear,
-		body.RentCents, body.AvailableFrom, body.AvailableTo,
+		body.RentCents, body.AvailableFrom, availableTo,
 		body.Bedrooms, body.Bathrooms, body.Amenities, body.Images,
 	).Scan(&id)
 	if err != nil {

@@ -114,6 +114,7 @@ func TestIntegration_CreateAndGetListing(t *testing.T) {
 		UniversityNear: "UT Austin",
 		RentCents:     150000,
 		AvailableFrom: "2026-06-01",
+		AvailableTo:   "2026-08-31",
 		Bedrooms:      2,
 		Bathrooms:     1.0,
 	}
