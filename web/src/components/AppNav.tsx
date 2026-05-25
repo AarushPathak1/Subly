@@ -10,7 +10,7 @@ export function AppNav({ active }: AppNavProps) {
   return (
     <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-slate-100">
       <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2.5">
+        <Link href="/dashboard" className="flex items-center gap-2.5">
           <SublyLogo />
           <span className="text-xl font-bold tracking-tight text-slate-900">Subly</span>
         </Link>
