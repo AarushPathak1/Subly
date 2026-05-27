@@ -16,9 +16,9 @@ const PROGRESS_ITEMS = [
 export function NewListingClient() {
   const [filled, setFilled] = useState<Record<string, boolean>>({});
 
-  function handleFormChange(e: React.ChangeEvent<HTMLElement>) {
+  function handleFormChange(e: React.FormEvent<HTMLDivElement>) {
     const target = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-    if (target.name) {
+    if ("name" in target && target.name) {
       setFilled((prev) => ({ ...prev, [target.name]: !!target.value.trim() }));
     }
   }
