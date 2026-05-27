@@ -55,7 +55,7 @@ function SectionHeader({ icon, title, subtitle }: { icon: string; title: string;
   );
 }
 
-export default function ListingForm() {
+export default function ListingForm({ onImagesChange }: { onImagesChange?: (count: number) => void }) {
   const formRef = useRef<HTMLFormElement>(null);
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -83,7 +83,11 @@ export default function ListingForm() {
     setUploading(true);
     try {
       const urls = await Promise.all(files.map(uploadToS3));
-      setImages((prev) => [...prev, ...urls]);
+      setImages((prev) => {
+        const next = [...prev, ...urls];
+        onImagesChange?.(next.length);
+        return next;
+      });
     } catch {
       toast.error("Image upload failed. Please try again.");
     } finally {
@@ -93,7 +97,11 @@ export default function ListingForm() {
   }
 
   function removeImage(index: number) {
-    setImages((prev) => prev.filter((_, i) => i !== index));
+    setImages((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      onImagesChange?.(next.length);
+      return next;
+    });
   }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
