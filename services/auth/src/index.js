@@ -199,6 +199,80 @@ app.post("/invite-request", async (req, res) => {
 });
 
 /**
+ * GET /admin/invite-requests
+ * Admin only (X-Admin-Secret header). Returns all invite requests.
+ */
+app.get("/admin/invite-requests", (req, res, next) => {
+  if (req.headers["x-admin-secret"] !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  next();
+}, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, email, university_name, status, redeemed_at, created_at
+       FROM invite_requests ORDER BY created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("[auth] /admin/invite-requests error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * PATCH /admin/invite-requests/:id
+ * Admin only (X-Admin-Secret header). Approves or rejects a pending invite.
+ * Body: { action: 'approve' | 'reject' }
+ */
+app.patch("/admin/invite-requests/:id", (req, res, next) => {
+  if (req.headers["x-admin-secret"] !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  next();
+}, async (req, res) => {
+  const { id } = req.params;
+  const { action } = req.body;
+
+  if (action !== "approve" && action !== "reject") {
+    return res.status(400).json({ error: "action must be 'approve' or 'reject'" });
+  }
+
+  try {
+    if (action === "reject") {
+      const { rows } = await db.query(
+        `UPDATE invite_requests SET status = 'rejected', updated_at = NOW()
+         WHERE id = $1 AND status = 'pending' RETURNING email`,
+        [id]
+      );
+      if (!rows.length) return res.status(404).json({ error: "Pending invite not found" });
+      return res.json({ rejected: true, email: rows[0].email });
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const { rows } = await db.query(
+      `UPDATE invite_requests
+       SET verification_token = $1, status = 'approved', updated_at = NOW()
+       WHERE id = $2 AND status = 'pending'
+       RETURNING email, university_name`,
+      [token, id]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Pending invite not found" });
+
+    const baseUrl = process.env.APP_URL || "http://localhost:3000";
+    res.json({
+      approved: true,
+      email: rows[0].email,
+      university_name: rows[0].university_name,
+      magic_link: `${baseUrl}/signup?token=${token}`,
+    });
+  } catch (err) {
+    console.error("[auth] /admin/invite-requests/:id error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * GET /invite-request/verify?token=xxx
  * Public. Validates a verification_token and returns a short-lived signed token
  * the frontend uses to authorise the redemption step.
