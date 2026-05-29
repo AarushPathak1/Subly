@@ -34,3 +34,8 @@ export const ListingSchema = z.object({
 });
 
 export type ListingFormValues = z.infer<typeof ListingSchema>;
+
+export const InviteRequestSchema = z.object({
+  email: z.string().email("Please enter a valid email address"),
+  university_name: z.string().min(2, "Please enter your university or college"),
+});

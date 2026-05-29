@@ -9,6 +9,7 @@ import {
   VerifyEmailSchema,
   VibeProfileSchema,
   ListingSchema,
+  InviteRequestSchema,
 } from "@/lib/schemas";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
@@ -119,6 +120,31 @@ export async function createListing(
 
   // Return toast message so the client can display it before navigating away.
   return { toast: "Listing queued for AI verification" };
+}
+
+// ─── Request invite (non-.edu users) ─────────────────────────────────────────
+
+export async function requestInvite(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const parsed = InviteRequestSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const res = await fetch(`${GATEWAY}/api/auth/invite-request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(parsed.data),
+  });
+
+  if (res.status === 409) return { toast: "You're already on the list — we'll be in touch!" };
+  if (res.status === 400) {
+    const data = await res.json().catch(() => ({}));
+    return { error: data.error ?? "Invalid request." };
+  }
+  if (!res.ok) return { error: "Something went wrong. Please try again." };
+
+  return { toast: "You're on the list! We'll email you when a spot opens up." };
 }
 
 // ─── S3 pre-signed upload URL ─────────────────────────────────────────────────

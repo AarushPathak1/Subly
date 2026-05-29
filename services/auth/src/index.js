@@ -162,6 +162,41 @@ app.post("/profile", requireAuth(), async (req, res) => {
   }
 });
 
+/**
+ * POST /invite-request
+ * Public endpoint. Accepts non-.edu email + university, queues an invite request.
+ * Returns 400 if the email ends in .edu (use main signup instead).
+ * Returns 409 if the email is already on the list.
+ */
+app.post("/invite-request", async (req, res) => {
+  const { email, university_name } = req.body;
+
+  if (!email || typeof email !== "string") {
+    return res.status(400).json({ error: "email required" });
+  }
+
+  if (email.trim().toLowerCase().endsWith(".edu")) {
+    return res.status(400).json({
+      error: "You have a .edu address — sign up directly instead!",
+    });
+  }
+
+  try {
+    await db.query(
+      `INSERT INTO invite_requests (email, university_name)
+       VALUES ($1, $2)`,
+      [email.trim().toLowerCase(), university_name?.trim() ?? null]
+    );
+    res.status(201).json({ queued: true });
+  } catch (err) {
+    if (err.code === "23505") {
+      return res.status(409).json({ error: "Already on the list" });
+    }
+    console.error("[auth] /invite-request error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const { deriveUniversity } = require("./utils");
 const universityDomainMap = require("./university-domain-map.json");

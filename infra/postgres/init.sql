@@ -85,3 +85,20 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER users_updated_at         BEFORE UPDATE ON users         FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER listings_updated_at      BEFORE UPDATE ON listings      FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER user_profiles_updated_at BEFORE UPDATE ON user_profiles FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ─── Invite Requests ────────────────────────────────────────────────────────
+CREATE TYPE invite_request_status AS ENUM ('pending', 'approved', 'rejected');
+
+CREATE TABLE IF NOT EXISTS invite_requests (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email               TEXT UNIQUE NOT NULL,
+    university_name     TEXT,
+    status              invite_request_status DEFAULT 'pending',
+    verification_token  TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS invite_requests_status_idx ON invite_requests(status);
+
+CREATE TRIGGER invite_requests_updated_at BEFORE UPDATE ON invite_requests FOR EACH ROW EXECUTE FUNCTION set_updated_at();

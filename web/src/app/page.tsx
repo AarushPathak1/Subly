@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { SublyLogo } from "@/components/SublyLogo";
+import { InviteButton } from "@/components/InviteButton";
 
 function CheckIcon() {
   return (
@@ -118,7 +119,7 @@ export default async function Home() {
                 Subly is the only subleasing marketplace built exclusively for students. Every listing, every renter, and every message comes from someone with a verified <strong className="text-white font-semibold">.edu address.</strong> No scammers, no strangers, no stress.
               </p>
 
-              <div className="flex flex-col sm:flex-row gap-3 mb-12">
+              <div className="flex flex-col sm:flex-row gap-3 mb-4">
                 <SignedOut>
                   <SignUpButton mode="modal">
                     <button className="px-7 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition shadow-lg shadow-indigo-900/50 text-base">
@@ -135,6 +136,10 @@ export default async function Home() {
                   </Link>
                 </SignedIn>
               </div>
+              <SignedOut>
+                <InviteButton />
+              </SignedOut>
+              <div className="mb-8" />
 
               <div className="flex items-center gap-8">
                 {[
