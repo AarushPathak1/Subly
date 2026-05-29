@@ -7,7 +7,7 @@ const inputCls =
   "w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none bg-slate-50 placeholder:text-slate-400 transition";
 const labelCls = "block text-sm font-semibold text-slate-700 mb-2";
 
-function SubmitButton() {
+function SubmitButton({ isEditing }: { isEditing: boolean }) {
   const { pending } = useFormStatus();
   return (
     <button
@@ -21,14 +21,21 @@ function SubmitButton() {
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
           </svg>
-          Saving preferences...
+          Saving...
         </span>
-      ) : "Save & find my matches →"}
+      ) : isEditing ? "Save changes →" : "Save & find my matches →"}
     </button>
   );
 }
 
-export default function VibeForm({ university }: { university: string }) {
+interface Existing {
+  vibe_text: string;
+  university: string;
+  max_rent: string;
+  min_bedrooms: string;
+}
+
+export default function VibeForm({ university, existing }: { university: string; existing?: Existing }) {
   const [state, action] = useFormState(saveProfile, null);
 
   return (
@@ -41,6 +48,7 @@ export default function VibeForm({ university }: { university: string }) {
         <textarea
           name="vibe_text"
           rows={4}
+          defaultValue={existing?.vibe_text ?? ""}
           placeholder="e.g. Quiet, clean, close to campus, pet-friendly, prefer 2+ bed, no smokers, furnished if possible..."
           className={`${inputCls} resize-none`}
         />
@@ -52,7 +60,7 @@ export default function VibeForm({ university }: { university: string }) {
         <input
           name="university"
           type="text"
-          defaultValue={university}
+          defaultValue={existing?.university ?? university}
           placeholder="e.g. UT Austin, UCLA, Georgia Tech"
           className={inputCls}
         />
@@ -70,6 +78,7 @@ export default function VibeForm({ university }: { university: string }) {
               step="50"
               placeholder="1,500"
               required
+              defaultValue={existing?.max_rent ?? ""}
               className={`${inputCls} pl-8`}
             />
           </div>
@@ -78,7 +87,7 @@ export default function VibeForm({ university }: { university: string }) {
           <label className={labelCls}>Min bedrooms</label>
           <select
             name="min_bedrooms"
-            defaultValue="1"
+            defaultValue={existing?.min_bedrooms ?? "1"}
             className={`${inputCls} bg-white cursor-pointer`}
           >
             <option value="1">1+ bedroom</option>
@@ -99,7 +108,7 @@ export default function VibeForm({ university }: { university: string }) {
         </div>
       )}
 
-      <SubmitButton />
+      <SubmitButton isEditing={!!existing} />
     </form>
   );
 }

@@ -1,14 +1,25 @@
 import { requireEduVerified } from "@/lib/auth";
+import { auth } from "@clerk/nextjs/server";
 import { SublyLogo } from "@/components/SublyLogo";
 import Link from "next/link";
 import VibeForm from "./VibeForm";
 
+const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
+
 export default async function OnboardingPage() {
   const user = await requireEduVerified();
+  const { getToken } = auth();
+  const token = await getToken();
+
+  const profileRes = await fetch(`${GATEWAY}/api/auth/profile`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const existing = profileRes.ok ? await profileRes.json() : null;
+  const isEditing = !!existing;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Minimal nav */}
       <nav className="bg-white border-b border-slate-100 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link href="/dashboard" className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition">
@@ -23,7 +34,9 @@ export default async function OnboardingPage() {
             <span className="text-lg font-bold tracking-tight text-slate-900">Subly</span>
           </Link>
         </div>
-        <span className="text-sm text-slate-500">Step 2 of 3 — Your Vibe</span>
+        <span className="text-sm text-slate-500">
+          {isEditing ? "Edit preferences" : "Step 2 of 3 — Your Vibe"}
+        </span>
       </nav>
 
       <div className="flex flex-1">
@@ -68,25 +81,44 @@ export default async function OnboardingPage() {
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="w-full max-w-lg">
             <div className="mb-8">
-              <div className="flex items-center gap-2 mb-6">
-                <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-500 text-sm font-bold flex items-center justify-center">✓</div>
-                <div className="h-px flex-1 bg-indigo-200" />
-                <div className="w-8 h-8 rounded-full bg-indigo-600 text-white text-sm font-bold flex items-center justify-center">2</div>
-                <div className="h-px flex-1 bg-slate-200" />
-                <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-400 text-sm font-bold flex items-center justify-center">3</div>
-              </div>
-              <h1 className="text-2xl font-extrabold text-slate-900 mb-2">Vibe Check</h1>
-              <p className="text-slate-500 text-sm leading-relaxed">
-                Help our AI understand what you&apos;re looking for. The more detail, the better your matches — think of it as describing your ideal place to a friend.
-              </p>
+              {isEditing ? (
+                <>
+                  <h1 className="text-2xl font-extrabold text-slate-900 mb-2">Your preferences</h1>
+                  <p className="text-slate-500 text-sm leading-relaxed">
+                    Update your vibe and we&apos;ll re-run the matching engine with your new preferences.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 mb-6">
+                    <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-500 text-sm font-bold flex items-center justify-center">✓</div>
+                    <div className="h-px flex-1 bg-indigo-200" />
+                    <div className="w-8 h-8 rounded-full bg-indigo-600 text-white text-sm font-bold flex items-center justify-center">2</div>
+                    <div className="h-px flex-1 bg-slate-200" />
+                    <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-400 text-sm font-bold flex items-center justify-center">3</div>
+                  </div>
+                  <h1 className="text-2xl font-extrabold text-slate-900 mb-2">Vibe Check</h1>
+                  <p className="text-slate-500 text-sm leading-relaxed">
+                    Help our AI understand what you&apos;re looking for. The more detail, the better your matches — think of it as describing your ideal place to a friend.
+                  </p>
+                </>
+              )}
             </div>
 
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
-              <VibeForm university={user.university ?? ""} />
+              <VibeForm
+                university={user.university ?? ""}
+                existing={existing ? {
+                  vibe_text: existing.vibe_text ?? "",
+                  university: existing.university ?? user.university ?? "",
+                  max_rent: existing.max_rent_cents ? String(existing.max_rent_cents / 100) : "",
+                  min_bedrooms: String(existing.min_bedrooms ?? "1"),
+                } : undefined}
+              />
             </div>
 
             <p className="text-center text-xs text-slate-400 mt-6">
-              You can update your preferences anytime from your dashboard.
+              {isEditing ? "Changes take effect immediately on your next dashboard visit." : "You can update your preferences anytime from your dashboard."}
             </p>
           </div>
         </div>
