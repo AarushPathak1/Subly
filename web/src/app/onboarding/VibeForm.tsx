@@ -2,6 +2,7 @@
 
 import { useFormState, useFormStatus } from "react-dom";
 import { saveProfile } from "@/lib/actions";
+import { UniversityCombobox } from "@/components/UniversityCombobox";
 
 const inputCls =
   "w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none bg-slate-50 placeholder:text-slate-400 transition";
@@ -57,11 +58,9 @@ export default function VibeForm({ university, existing }: { university: string;
 
       <div>
         <label className={labelCls}>University / area</label>
-        <input
+        <UniversityCombobox
           name="university"
-          type="text"
           defaultValue={existing?.university ?? university}
-          placeholder="e.g. UT Austin, UCLA, Georgia Tech"
           className={inputCls}
         />
       </div>

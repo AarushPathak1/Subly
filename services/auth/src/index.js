@@ -43,7 +43,7 @@ app.post("/verify-edu", requireAuth(), async (req, res) => {
     }
 
     const isEdu = email.toLowerCase().endsWith(".edu");
-    const university = isEdu ? deriveUniversity(email) : null;
+    const university = isEdu ? lookupUniversity(email) : null;
 
     await db.query(
       `INSERT INTO users (clerk_id, email, edu_verified, university)
@@ -164,6 +164,19 @@ app.post("/profile", requireAuth(), async (req, res) => {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const { deriveUniversity } = require("./utils");
+const universityDomainMap = require("./university-domain-map.json");
+
+function lookupUniversity(email) {
+  const domain = email.toLowerCase().split("@")[1] ?? "";
+  // Try exact domain match first, then strip subdomains progressively
+  const parts = domain.split(".");
+  for (let i = 0; i < parts.length - 1; i++) {
+    const candidate = parts.slice(i).join(".");
+    if (universityDomainMap[candidate]) return universityDomainMap[candidate];
+  }
+  // Fall back to the old uppercased abbreviation so we always return something
+  return deriveUniversity(email);
+}
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
