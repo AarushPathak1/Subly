@@ -65,8 +65,20 @@ export default async function NewListingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-slate-50 to-violet-50">
       {nav}
+
+      {/* Colored banner */}
+      <div className="bg-gradient-to-r from-violet-900 via-indigo-900 to-slate-900 px-6 py-10">
+        <div className="max-w-5xl mx-auto">
+          <p className="text-xs font-semibold text-violet-300 uppercase tracking-widest mb-2">New listing</p>
+          <h1 className="text-3xl font-extrabold text-white mb-2">Post your sublease</h1>
+          <p className="text-indigo-200 text-sm leading-relaxed max-w-xl">
+            Your listing will be AI-scored for quality and scam signals before going live. Fill in as much detail as possible for better matches.
+          </p>
+        </div>
+      </div>
+
       <div className="max-w-5xl mx-auto px-6 py-8">
         <NewListingClient />
       </div>
