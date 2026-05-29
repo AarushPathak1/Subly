@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(npm install *)",
+      "Bash(docker compose *)",
+      "Bash(echo \"Build started in background \\(PID $!\\)\")",
+      "Bash(npx tsc *)",
+      "Bash(npm test *)",
+      "Bash(go test *)",
+      "Bash(pip install *)",
+      "Bash(pytest tests/ -v --tb=short)",
+      "Bash(curl -s http://localhost:8080/healthz)",
+      "Bash(curl -s http://localhost:3002/healthz)",
+      "Bash(curl -s http://localhost:3001/healthz)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/Hipo/university-domains-list/master/world_universities_and_domains.json\")",
+      "Bash(python3 -c \" import json, sys data = json.load\\(sys.stdin\\) us_universities = [{'name': u['name'], 'domains': u['domains']} for u in data if u.get\\('country'\\) == 'United States'] us_universities.sort\\(key=lambda x: x['name']\\) print\\(f'COUNT:{len\\(us_universities\\)}', file=sys.stderr\\) print\\(json.dumps\\(us_universities, indent=2\\)\\) \" cat /tmp/us_uni_count.txt wc -l /tmp/us_universities.json)",
+      "Bash(python3 *)",
+      "Bash(docker exec subly-postgres psql -U subly -d subly -c ' *)",
+      "Bash(docker exec subly-postgres *)"
+    ]
+  }
+}

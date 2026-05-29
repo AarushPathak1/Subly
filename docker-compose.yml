@@ -93,6 +93,8 @@ services:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-subly}:${POSTGRES_PASSWORD:-subly_secret}@postgres:5432/${POSTGRES_DB:-subly}"
       RABBITMQ_URL: "amqp://${RABBITMQ_USER:-subly}:${RABBITMQ_PASS:-subly_secret}@rabbitmq:5672"
       NODE_ENV: ${ENV:-development}
+      INVITE_SECRET: ${INVITE_SECRET:-dev-invite-secret-change-in-prod}
+      APP_URL: ${APP_URL:-http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy

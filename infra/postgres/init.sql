@@ -87,7 +87,7 @@ CREATE TRIGGER listings_updated_at      BEFORE UPDATE ON listings      FOR EACH 
 CREATE TRIGGER user_profiles_updated_at BEFORE UPDATE ON user_profiles FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ─── Invite Requests ────────────────────────────────────────────────────────
-CREATE TYPE invite_request_status AS ENUM ('pending', 'approved', 'rejected');
+CREATE TYPE invite_request_status AS ENUM ('pending', 'approved', 'rejected', 'redeemed');
 
 CREATE TABLE IF NOT EXISTS invite_requests (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS invite_requests (
     university_name     TEXT,
     status              invite_request_status DEFAULT 'pending',
     verification_token  TEXT,
+    redeemed_at         TIMESTAMPTZ,
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     updated_at          TIMESTAMPTZ DEFAULT NOW()
 );

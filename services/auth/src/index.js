@@ -2,6 +2,7 @@ const express = require("express");
 const { clerkMiddleware, requireAuth, getAuth } = require("@clerk/express");
 const { Pool } = require("pg");
 const amqp = require("amqplib");
+const crypto = require("crypto");
 
 const app = express();
 app.use(express.json());
@@ -197,6 +198,89 @@ app.post("/invite-request", async (req, res) => {
   }
 });
 
+/**
+ * GET /invite-request/verify?token=xxx
+ * Public. Validates a verification_token and returns a short-lived signed token
+ * the frontend uses to authorise the redemption step.
+ */
+app.get("/invite-request/verify", async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).json({ error: "token required" });
+
+  try {
+    const { rows } = await db.query(
+      `SELECT id, email, university_name, status, redeemed_at
+       FROM invite_requests WHERE verification_token = $1`,
+      [token]
+    );
+
+    if (!rows.length) return res.status(404).json({ error: "Invalid or expired invite link" });
+    const invite = rows[0];
+
+    if (invite.status !== "approved") {
+      return res.status(400).json({ error: "This invite has not been approved yet" });
+    }
+    if (invite.redeemed_at) {
+      return res.status(400).json({ error: "This invite link has already been used" });
+    }
+
+    const signedToken = createSignedToken(invite.id);
+    res.json({ email: invite.email, university_name: invite.university_name, signed_token: signedToken });
+  } catch (err) {
+    console.error("[auth] /invite-request/verify error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /invite-request/redeem
+ * Authenticated. Verifies the signed token, inserts the user with edu_verified=true,
+ * and marks the invite as redeemed (single-use).
+ */
+app.post("/invite-request/redeem", requireAuth(), async (req, res) => {
+  const { userId } = getAuth(req);
+  const { signed_token } = req.body;
+
+  if (!signed_token) return res.status(400).json({ error: "signed_token required" });
+
+  const inviteId = verifySignedToken(signed_token);
+  if (!inviteId) return res.status(400).json({ error: "Signed token is invalid or has expired" });
+
+  try {
+    const { rows } = await db.query(
+      `SELECT id, email, university_name, status, redeemed_at
+       FROM invite_requests WHERE id = $1`,
+      [inviteId]
+    );
+
+    if (!rows.length) return res.status(404).json({ error: "Invite not found" });
+    const invite = rows[0];
+
+    if (invite.status !== "approved") return res.status(400).json({ error: "Invite not approved" });
+    if (invite.redeemed_at) return res.status(409).json({ error: "Invite already redeemed" });
+
+    await db.query(
+      `INSERT INTO users (clerk_id, email, edu_verified, university)
+       VALUES ($1, $2, TRUE, $3)
+       ON CONFLICT (clerk_id) DO UPDATE
+         SET edu_verified = TRUE, university = $3, updated_at = NOW()`,
+      [userId, invite.email, invite.university_name]
+    );
+
+    await db.query(
+      `UPDATE invite_requests
+       SET status = 'redeemed', redeemed_at = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [inviteId]
+    );
+
+    res.json({ success: true, university: invite.university_name });
+  } catch (err) {
+    console.error("[auth] /invite-request/redeem error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const { deriveUniversity } = require("./utils");
 const universityDomainMap = require("./university-domain-map.json");
@@ -211,6 +295,33 @@ function lookupUniversity(email) {
   }
   // Fall back to the old uppercased abbreviation so we always return something
   return deriveUniversity(email);
+}
+
+function createSignedToken(inviteId) {
+  const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes
+  const payload = `${inviteId}:${expiresAt}`;
+  const secret = process.env.INVITE_SECRET || "dev-invite-secret-change-in-prod";
+  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  return Buffer.from(`${payload}:${sig}`).toString("base64url");
+}
+
+function verifySignedToken(token) {
+  try {
+    const decoded = Buffer.from(token, "base64url").toString("utf8");
+    // format: inviteId:expiresAt:sig  (UUID has no colons, expiresAt is digits)
+    const parts = decoded.split(":");
+    if (parts.length !== 3) return null;
+    const [inviteId, expiresAtStr, sig] = parts;
+    if (Date.now() > parseInt(expiresAtStr, 10)) return null;
+    const secret = process.env.INVITE_SECRET || "dev-invite-secret-change-in-prod";
+    const expected = crypto.createHmac("sha256", secret)
+      .update(`${inviteId}:${expiresAtStr}`)
+      .digest("hex");
+    if (sig !== expected) return null;
+    return inviteId;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Start ───────────────────────────────────────────────────────────────────
