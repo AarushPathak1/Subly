@@ -34,7 +34,14 @@ export function NewListingClient() {
   return (
     <div className="grid lg:grid-cols-3 gap-6">
       {/* Main form */}
-      <div className="lg:col-span-2">
+      <div className="lg:col-span-2 space-y-6">
+        <div>
+          <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest mb-1.5">New listing</p>
+          <h1 className="text-3xl font-extrabold text-slate-900 mb-1.5">Post your sublease</h1>
+          <p className="text-slate-500 text-sm leading-relaxed">
+            Your listing will be AI-scored for quality and scam signals before going live. Fill in as much detail as possible for better matches.
+          </p>
+        </div>
         <div
           className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8"
           onChange={handleFormChange}
