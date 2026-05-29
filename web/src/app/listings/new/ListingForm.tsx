@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { UniversityCombobox } from "@/components/UniversityCombobox";
 import { createListing, getPresignedUrl } from "@/lib/actions";
 import { ListingSchema } from "@/lib/schemas";
 
@@ -203,9 +204,8 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
           </div>
           <div>
             <label className={labelCls}>Nearest university</label>
-            <input
+            <UniversityCombobox
               name="university_near"
-              type="text"
               placeholder="e.g. UT Austin, UCLA, Georgia Tech"
               className={inputCls}
             />
