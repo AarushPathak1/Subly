@@ -1,9 +1,9 @@
-import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { SublyLogo } from "@/components/SublyLogo";
-import { InviteButton } from "@/components/InviteButton";
+import { GetStartedFlow } from "@/components/GetStartedFlow";
 
 function CheckIcon() {
   return (
@@ -79,11 +79,7 @@ export default async function Home() {
                   Sign in
                 </button>
               </SignInButton>
-              <SignUpButton mode="modal">
-                <button className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition shadow-sm">
-                  Get started free
-                </button>
-              </SignUpButton>
+              <GetStartedFlow compact />
             </SignedOut>
             <SignedIn>
               <Link href="/dashboard" className="text-sm font-medium text-slate-600 hover:text-slate-900">Dashboard</Link>
@@ -119,13 +115,9 @@ export default async function Home() {
                 Subly is the only subleasing marketplace built exclusively for students. Every listing, every renter, and every message comes from someone with a verified <strong className="text-white font-semibold">.edu address.</strong> No scammers, no strangers, no stress.
               </p>
 
-              <div className="flex flex-col sm:flex-row gap-3 mb-4">
+              <div className="flex flex-col sm:flex-row gap-3 mb-12">
                 <SignedOut>
-                  <SignUpButton mode="modal">
-                    <button className="px-7 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition shadow-lg shadow-indigo-900/50 text-base">
-                      Get started for free
-                    </button>
-                  </SignUpButton>
+                  <GetStartedFlow />
                   <Link href="/dashboard" className="px-7 py-3.5 bg-white/10 hover:bg-white/15 text-white font-semibold rounded-xl transition border border-white/20 text-base text-center">
                     Browse listings
                   </Link>
@@ -136,10 +128,6 @@ export default async function Home() {
                   </Link>
                 </SignedIn>
               </div>
-              <SignedOut>
-                <InviteButton />
-              </SignedOut>
-              <div className="mb-8" />
 
               <div className="flex items-center gap-8">
                 {[
@@ -494,11 +482,7 @@ export default async function Home() {
           </p>
           <SignedOut>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <SignUpButton mode="modal">
-                <button className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition shadow-lg shadow-indigo-900/50 text-base">
-                  Create a free account
-                </button>
-              </SignUpButton>
+              <GetStartedFlow />
               <SignInButton mode="modal">
                 <button className="px-8 py-4 bg-white/10 hover:bg-white/15 text-white font-semibold rounded-xl transition border border-white/20 text-base">
                   Sign in
