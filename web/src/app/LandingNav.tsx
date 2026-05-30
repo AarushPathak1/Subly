@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
 import { SublyLogo } from "@/components/SublyLogo";
@@ -8,22 +8,20 @@ import { GetStartedFlow } from "@/components/GetStartedFlow";
 
 export function LandingNav() {
   const [dark, setDark] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
+    const hero = document.getElementById("hero");
+    if (!hero) return;
     const observer = new IntersectionObserver(
       ([entry]) => setDark(!entry.isIntersecting),
       { threshold: 0 }
     );
-    observer.observe(sentinel);
+    observer.observe(hero);
     return () => observer.disconnect();
   }, []);
 
   return (
-    <>
-      <nav className={`sticky top-0 z-50 border-b transition-colors duration-300 ${
+    <nav className={`sticky top-0 z-50 border-b transition-colors duration-300 ${
         dark
           ? "bg-slate-900 border-slate-800"
           : "bg-white/90 backdrop-blur border-slate-100"
@@ -63,9 +61,5 @@ export function LandingNav() {
           </div>
         </div>
       </nav>
-
-      {/* Sentinel sits at the bottom of the hero — when it leaves the viewport the nav goes dark */}
-      <div ref={sentinelRef} className="absolute" style={{ top: "100vh" }} />
-    </>
   );
 }
