@@ -12,12 +12,10 @@ export function LandingNav() {
   useEffect(() => {
     const hero = document.getElementById("hero");
     if (!hero) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => setDark(!entry.isIntersecting),
-      { threshold: 0 }
-    );
-    observer.observe(hero);
-    return () => observer.disconnect();
+    const check = () => setDark(hero.getBoundingClientRect().bottom <= 0);
+    check();
+    window.addEventListener("scroll", check, { passive: true });
+    return () => window.removeEventListener("scroll", check);
   }, []);
 
   return (
