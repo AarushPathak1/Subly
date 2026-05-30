@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useClerk } from "@clerk/nextjs";
 import { InviteModal } from "./InviteModal";
 
@@ -62,8 +63,8 @@ export function GetStartedFlow({ compact = false }: { compact?: boolean }) {
         {compact ? "Get started free" : "Get started for free"}
       </button>
 
-      {/* Email gate modal */}
-      {modalOpen && (
+      {/* Email gate modal — rendered via portal to escape navbar stacking context */}
+      {modalOpen && typeof document !== "undefined" && createPortal(
         <div
           ref={overlayRef}
           className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
@@ -123,7 +124,8 @@ export function GetStartedFlow({ compact = false }: { compact?: boolean }) {
               </button>
             </p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <InviteModal

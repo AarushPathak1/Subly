@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useFormState, useFormStatus } from "react-dom";
 import { requestInvite } from "@/lib/actions";
 import { toast } from "sonner";
@@ -52,9 +53,9 @@ export function InviteModal({ open, onClose, onSignUpDirectly }: Props) {
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
       ref={overlayRef}
       className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
@@ -133,6 +134,7 @@ export function InviteModal({ open, onClose, onSignUpDirectly }: Props) {
           </p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
