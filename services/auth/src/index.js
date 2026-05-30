@@ -3,6 +3,7 @@ const { clerkMiddleware, requireAuth, getAuth } = require("@clerk/express");
 const { Pool } = require("pg");
 const amqp = require("amqplib");
 const crypto = require("crypto");
+const { lookupUniversity, createSignedToken, verifySignedToken } = require("./helpers");
 
 const app = express();
 app.use(express.json());
@@ -19,7 +20,6 @@ async function connectMQ() {
   await channel.assertQueue("user.registered", { durable: true });
   console.log("[auth] RabbitMQ connected");
 }
-connectMQ().catch(console.error);
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
@@ -355,49 +355,11 @@ app.post("/invite-request/redeem", requireAuth(), async (req, res) => {
   }
 });
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const { deriveUniversity } = require("./utils");
-const universityDomainMap = require("./university-domain-map.json");
-
-function lookupUniversity(email) {
-  const domain = email.toLowerCase().split("@")[1] ?? "";
-  // Try exact domain match first, then strip subdomains progressively
-  const parts = domain.split(".");
-  for (let i = 0; i < parts.length - 1; i++) {
-    const candidate = parts.slice(i).join(".");
-    if (universityDomainMap[candidate]) return universityDomainMap[candidate];
-  }
-  // Fall back to the old uppercased abbreviation so we always return something
-  return deriveUniversity(email);
-}
-
-function createSignedToken(inviteId) {
-  const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes
-  const payload = `${inviteId}:${expiresAt}`;
-  const secret = process.env.INVITE_SECRET || "dev-invite-secret-change-in-prod";
-  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-  return Buffer.from(`${payload}:${sig}`).toString("base64url");
-}
-
-function verifySignedToken(token) {
-  try {
-    const decoded = Buffer.from(token, "base64url").toString("utf8");
-    // format: inviteId:expiresAt:sig  (UUID has no colons, expiresAt is digits)
-    const parts = decoded.split(":");
-    if (parts.length !== 3) return null;
-    const [inviteId, expiresAtStr, sig] = parts;
-    if (Date.now() > parseInt(expiresAtStr, 10)) return null;
-    const secret = process.env.INVITE_SECRET || "dev-invite-secret-change-in-prod";
-    const expected = crypto.createHmac("sha256", secret)
-      .update(`${inviteId}:${expiresAtStr}`)
-      .digest("hex");
-    if (sig !== expected) return null;
-    return inviteId;
-  } catch {
-    return null;
-  }
-}
-
 // ─── Start ───────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`[auth] listening on :${PORT}`));
+if (require.main === module) {
+  connectMQ().catch(console.error);
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => console.log(`[auth] listening on :${PORT}`));
+}
+
+module.exports = { app, db, connectMQ, getChannel: () => channel };

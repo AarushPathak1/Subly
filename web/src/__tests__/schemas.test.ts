@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { VerifyEmailSchema, VibeProfileSchema, ListingSchema } from "@/lib/schemas";
+import { VerifyEmailSchema, VibeProfileSchema, ListingSchema, InviteRequestSchema } from "@/lib/schemas";
 
 // ── VerifyEmailSchema ─────────────────────────────────────────────────────────
 
@@ -141,5 +141,39 @@ describe("ListingSchema", () => {
   it("rejects a missing available_from date", () => {
     const result = ListingSchema.safeParse({ ...valid, available_from: "" });
     expect(result.success).toBe(false);
+  });
+});
+
+// ── InviteRequestSchema ────────────────────────────────────────────────────────
+
+describe("InviteRequestSchema", () => {
+  const valid = { email: "student@gmail.com", university_name: "University of Texas" };
+
+  it("accepts a valid non-.edu email and university", () => {
+    expect(InviteRequestSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("also accepts a .edu email (schema does not block it; server does)", () => {
+    expect(InviteRequestSchema.safeParse({ ...valid, email: "s@ut.edu" }).success).toBe(true);
+  });
+
+  it("rejects a malformed email", () => {
+    const result = InviteRequestSchema.safeParse({ ...valid, email: "notanemail" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a university_name shorter than 2 characters", () => {
+    const result = InviteRequestSchema.safeParse({ ...valid, university_name: "X" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects missing email", () => {
+    const { email: _, ...rest } = valid;
+    expect(InviteRequestSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("rejects missing university_name", () => {
+    const { university_name: _, ...rest } = valid;
+    expect(InviteRequestSchema.safeParse(rest).success).toBe(false);
   });
 });
