@@ -29,9 +29,9 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 }
 
 // Use in any Server Component or layout that requires a verified .edu account.
-// Redirects to /verify for unverified or unknown users.
+// Redirects to /dashboard (which auto-verifies or shows the gate) for unverified users.
 export async function requireEduVerified(): Promise<SessionUser> {
   const user = await getSessionUser();
-  if (!user || !user.edu_verified) redirect("/verify");
+  if (!user || !user.edu_verified) redirect("/dashboard");
   return user;
 }

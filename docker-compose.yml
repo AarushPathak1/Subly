@@ -192,6 +192,8 @@ services:
       NEXT_PUBLIC_GATEWAY_URL: "http://localhost:8080"
       GATEWAY_URL: "http://gateway:8080"
       NODE_ENV: ${ENV:-development}
+      NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: /dashboard
+      NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: /dashboard
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       ADMIN_SECRET: ${ADMIN_SECRET:-dev-admin-secret-change-in-prod}
       APP_URL: ${APP_URL:-http://localhost:3000}

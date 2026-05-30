@@ -32,7 +32,7 @@ export default async function NewListingPage() {
           <span className="text-lg font-bold tracking-tight text-slate-900">Subly</span>
         </Link>
       </div>
-      <span className="text-sm text-slate-500">Step 3 of 3 — Post a sublease</span>
+      <span className="text-sm text-slate-500">Step 2 of 2 — Post a sublease</span>
     </nav>
   );
 

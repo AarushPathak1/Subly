@@ -35,7 +35,7 @@ export default async function OnboardingPage() {
           </Link>
         </div>
         <span className="text-sm text-slate-500">
-          {isEditing ? "Edit preferences" : "Step 2 of 3 — Your Vibe"}
+          {isEditing ? "Edit preferences" : "Step 1 of 2 — Your Vibe"}
         </span>
       </nav>
 
@@ -91,11 +91,9 @@ export default async function OnboardingPage() {
               ) : (
                 <>
                   <div className="flex items-center gap-2 mb-6">
-                    <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-500 text-sm font-bold flex items-center justify-center">✓</div>
-                    <div className="h-px flex-1 bg-indigo-200" />
-                    <div className="w-8 h-8 rounded-full bg-indigo-600 text-white text-sm font-bold flex items-center justify-center">2</div>
+                    <div className="w-8 h-8 rounded-full bg-indigo-600 text-white text-sm font-bold flex items-center justify-center">1</div>
                     <div className="h-px flex-1 bg-slate-200" />
-                    <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-400 text-sm font-bold flex items-center justify-center">3</div>
+                    <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-400 text-sm font-bold flex items-center justify-center">2</div>
                   </div>
                   <h1 className="text-2xl font-extrabold text-slate-900 mb-2">Vibe Check</h1>
                   <p className="text-slate-500 text-sm leading-relaxed">

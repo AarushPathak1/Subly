@@ -1,8 +1,8 @@
 import { getSessionUser } from "@/lib/auth";
-import { redirect } from "next/navigation";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { AppNav } from "@/components/AppNav";
+import { NonEduGate } from "@/components/NonEduGate";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -132,39 +132,31 @@ function EmptyState() {
 }
 
 export default async function DashboardPage() {
-  const user = await getSessionUser();
   const { getToken } = auth();
-  const token = await getToken();
+  const [clerkUser, token] = await Promise.all([currentUser(), getToken()]);
 
-  // Unverified users see the dashboard with a verification banner instead of a redirect loop
-  // Show verification prompt for any signed-in user who isn't fully verified yet
-  // (covers both: user not in DB at all, or in DB but edu_verified=false)
+  const primaryEmail = clerkUser?.emailAddresses.find(
+    (e) => e.id === clerkUser.primaryEmailAddressId
+  )?.emailAddress ?? null;
+
+  let user = await getSessionUser();
+
+  // Auto-verify: if not yet verified, try using their Clerk email directly
+  if ((!user || !user.edu_verified) && primaryEmail && token) {
+    const verifyRes = await fetch(`${GATEWAY}/api/auth/verify-edu`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ email: primaryEmail }),
+      cache: "no-store",
+    });
+    if (verifyRes.ok) {
+      const data = await verifyRes.json();
+      if (data.edu_verified) user = await getSessionUser();
+    }
+  }
+
   if (!user || !user.edu_verified) {
-    return (
-      <div className="min-h-screen bg-slate-50">
-        <AppNav active="dashboard" />
-        <div className="max-w-2xl mx-auto px-6 py-20 text-center">
-          <div className="bg-white border border-indigo-100 rounded-2xl p-10 shadow-sm">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center mx-auto mb-5">
-              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-                <path d="M14 3L4 7v7c0 5.5 4.3 10.7 10 12 5.7-1.3 10-6.5 10-12V7L14 3z" fill="#e0e7ff" stroke="#4f46e5" strokeWidth="1.5"/>
-                <path d="M9 14l3.5 3.5 6.5-6.5" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2">Verify your .edu email to continue</h2>
-            <p className="text-sm text-slate-500 mb-7 leading-relaxed">
-              Subly is only open to verified university students. Verify your email to unlock matches and listings.
-            </p>
-            <Link
-              href="/verify"
-              className="inline-block px-6 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition"
-            >
-              Verify my .edu email
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
+    return <NonEduGate email={primaryEmail} />;
   }
 
   const profileRes = await fetch(`${GATEWAY}/api/auth/profile`, {
