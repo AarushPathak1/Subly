@@ -8,18 +8,18 @@ interface AppNavProps {
 
 export function AppNav({ active }: AppNavProps) {
   return (
-    <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-slate-100">
+    <nav className="sticky top-0 z-50 bg-slate-900 border-b border-slate-800">
       <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
         <Link href="/dashboard" className="flex items-center gap-2.5">
           <SublyLogo />
-          <span className="text-xl font-bold tracking-tight text-slate-900">Subly</span>
+          <span className="text-xl font-bold tracking-tight text-white">Subly</span>
         </Link>
 
         <div className="flex items-center gap-6">
           <Link
             href="/dashboard"
             className={`text-sm font-medium transition ${
-              active === "dashboard" ? "text-indigo-600" : "text-slate-600 hover:text-slate-900"
+              active === "dashboard" ? "text-indigo-400" : "text-slate-400 hover:text-white"
             }`}
           >
             My matches
@@ -27,7 +27,7 @@ export function AppNav({ active }: AppNavProps) {
           <Link
             href="/listings"
             className={`text-sm font-medium transition ${
-              active === "browse" ? "text-indigo-600" : "text-slate-600 hover:text-slate-900"
+              active === "browse" ? "text-indigo-400" : "text-slate-400 hover:text-white"
             }`}
           >
             Browse
@@ -35,7 +35,7 @@ export function AppNav({ active }: AppNavProps) {
           <Link
             href="/listings/my"
             className={`text-sm font-medium transition ${
-              active === "my-listings" ? "text-indigo-600" : "text-slate-600 hover:text-slate-900"
+              active === "my-listings" ? "text-indigo-400" : "text-slate-400 hover:text-white"
             }`}
           >
             My listings
@@ -44,8 +44,8 @@ export function AppNav({ active }: AppNavProps) {
             href="/listings/new"
             className={`text-sm font-medium transition ${
               active === "new-listing"
-                ? "text-indigo-600"
-                : "text-slate-600 hover:text-slate-900"
+                ? "text-indigo-400"
+                : "text-slate-400 hover:text-white"
             }`}
           >
             Post sublease
@@ -53,7 +53,7 @@ export function AppNav({ active }: AppNavProps) {
           <Link
             href="/onboarding"
             className={`text-sm font-medium transition ${
-              active === "onboarding" ? "text-indigo-600" : "text-slate-600 hover:text-slate-900"
+              active === "onboarding" ? "text-indigo-400" : "text-slate-400 hover:text-white"
             }`}
           >
             Preferences
