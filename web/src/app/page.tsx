@@ -59,30 +59,30 @@ export default async function Home() {
   return (
     <div className="min-h-screen bg-white">
       {/* Navbar */}
-      <nav className="sticky top-0 z-50 bg-slate-900 border-b border-slate-800">
+      <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5">
             <SublyLogo />
-            <span className="text-xl font-bold tracking-tight text-white">Subly</span>
+            <span className="text-xl font-bold tracking-tight text-slate-900">Subly</span>
           </Link>
 
-          <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-400">
-            <Link href="#how-it-works" className="hover:text-white transition">How it works</Link>
-            <Link href="#features" className="hover:text-white transition">Features</Link>
-            <Link href="#testimonials" className="hover:text-white transition">Reviews</Link>
+          <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
+            <Link href="#how-it-works" className="hover:text-slate-900 transition">How it works</Link>
+            <Link href="#features" className="hover:text-slate-900 transition">Features</Link>
+            <Link href="#testimonials" className="hover:text-slate-900 transition">Reviews</Link>
           </div>
 
           <div className="flex items-center gap-3">
             <SignedOut>
               <SignInButton mode="modal">
-                <button className="text-sm font-medium text-slate-400 hover:text-white transition px-3 py-2">
+                <button className="text-sm font-medium text-slate-700 hover:text-slate-900 transition px-3 py-2">
                   Sign in
                 </button>
               </SignInButton>
               <GetStartedFlow compact />
             </SignedOut>
             <SignedIn>
-              <Link href="/dashboard" className="text-sm font-medium text-slate-400 hover:text-white transition">Dashboard</Link>
+              <Link href="/dashboard" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition">Dashboard</Link>
               <Link href="/listings/new" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition">
                 Post sublease
               </Link>
