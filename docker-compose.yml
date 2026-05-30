@@ -96,6 +96,8 @@ services:
       INVITE_SECRET: ${INVITE_SECRET:-dev-invite-secret-change-in-prod}
       APP_URL: ${APP_URL:-http://localhost:3000}
       ADMIN_SECRET: ${ADMIN_SECRET:-dev-admin-secret-change-in-prod}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      FROM_EMAIL: ${FROM_EMAIL:-Subly <invites@subly.app>}
     depends_on:
       postgres:
         condition: service_healthy

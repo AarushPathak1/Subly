@@ -3,7 +3,46 @@ const { clerkMiddleware, requireAuth, getAuth } = require("@clerk/express");
 const { Pool } = require("pg");
 const amqp = require("amqplib");
 const crypto = require("crypto");
+const { Resend } = require("resend");
 const { lookupUniversity, createSignedToken, verifySignedToken } = require("./helpers");
+
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
+
+async function sendInviteEmail({ to, universityName, magicLink }) {
+  if (!resend) {
+    console.log(`[auth] RESEND_API_KEY not set — magic link for ${to}: ${magicLink}`);
+    return;
+  }
+  const from = process.env.FROM_EMAIL || "Subly <invites@subly.app>";
+  await resend.emails.send({
+    from,
+    to,
+    subject: "Your Subly invite is ready",
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#fff">
+        <div style="margin-bottom:28px">
+          <span style="font-size:22px;font-weight:800;color:#1e1b4b;letter-spacing:-0.5px">Subly</span>
+        </div>
+        <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">You're in.</h1>
+        <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 24px">
+          Your request to join Subly${universityName ? ` for <strong>${universityName}</strong>` : ""} has been approved.
+          Click the button below to create your account — this link expires in <strong>30 minutes</strong>.
+        </p>
+        <a href="${magicLink}"
+          style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
+          Create my account →
+        </a>
+        <p style="color:#94a3b8;font-size:12px;margin-top:32px;line-height:1.5">
+          If you didn't request this, you can safely ignore this email.<br>
+          Link expires 30 minutes after this email was sent.
+        </p>
+      </div>
+    `,
+  });
+  console.log(`[auth] invite email sent to ${to}`);
+}
 
 const app = express();
 app.use(express.json());
@@ -260,11 +299,20 @@ app.patch("/admin/invite-requests/:id", (req, res, next) => {
     if (!rows.length) return res.status(404).json({ error: "Pending invite not found" });
 
     const baseUrl = process.env.APP_URL || "http://localhost:3000";
+    const magicLink = `${baseUrl}/signup?token=${token}`;
+
+    // Fire-and-forget — don't block the HTTP response on email delivery
+    sendInviteEmail({
+      to: rows[0].email,
+      universityName: rows[0].university_name,
+      magicLink,
+    }).catch((err) => console.error("[auth] invite email failed:", err));
+
     res.json({
       approved: true,
       email: rows[0].email,
       university_name: rows[0].university_name,
-      magic_link: `${baseUrl}/signup?token=${token}`,
+      magic_link: magicLink,
     });
   } catch (err) {
     console.error("[auth] /admin/invite-requests/:id error:", err);

@@ -3,10 +3,12 @@
 jest.mock("amqplib");
 jest.mock("pg");
 jest.mock("@clerk/express");
+jest.mock("resend");
 
 const request = require("supertest");
 const { app } = require("../index");
 const { resetStore, getStore } = require("pg");
+const { mockSend } = require("resend");
 
 const ADMIN_SECRET = "test-admin-secret";
 
@@ -138,6 +140,33 @@ describe("PATCH /admin/invite-requests/:id", () => {
       .patch(`/admin/invite-requests/${id}`)
       .send({ action: "approve" });
     expect(res.status).toBe(403);
+  });
+
+  it("calls resend.emails.send when RESEND_API_KEY is set", async () => {
+    process.env.RESEND_API_KEY = "re_test_key";
+    // Re-require so the module picks up the new env var
+    jest.resetModules();
+    jest.mock("amqplib");
+    jest.mock("pg");
+    jest.mock("@clerk/express");
+    jest.mock("resend");
+    const { app: freshApp } = require("../index");
+    const { resetStore: rs, getStore: gs } = require("pg");
+    const { mockSend: ms } = require("resend");
+    rs();
+    await request(freshApp).post("/invite-request").send({ email: "email@gmail.com", university_name: "NYU" });
+    const id = gs().invite_requests[0].id;
+    await request(freshApp)
+      .patch(`/admin/invite-requests/${id}`)
+      .set("x-admin-secret", ADMIN_SECRET)
+      .send({ action: "approve" });
+    // Give the fire-and-forget a tick to resolve
+    await new Promise((r) => setTimeout(r, 10));
+    expect(ms).toHaveBeenCalledWith(expect.objectContaining({
+      to: "email@gmail.com",
+      subject: expect.stringContaining("invite"),
+    }));
+    delete process.env.RESEND_API_KEY;
   });
 });
 
