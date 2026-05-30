@@ -158,7 +158,7 @@ async def run_trust_checks(listing_id: str) -> None:
     final = round(min(1.0, llm * 0.5 + kw * 0.3 + rf * 0.2), 3)
 
     cur.execute(
-        "UPDATE listings SET scam_score = %s WHERE id = %s",
+        "UPDATE listings SET scam_score = %s, status = 'active' WHERE id = %s",
         (final, listing_id),
     )
     log.info(

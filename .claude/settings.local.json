@@ -23,7 +23,8 @@
       "Bash(node -e \"console.log\\(require\\('./node_modules/vite/package.json'\\).version\\)\")",
       "Bash(node -e \"console.log\\(require\\('./node_modules/vitest/package.json'\\).version\\)\")",
       "Bash(node -e \"console.log\\(require\\('./node_modules/@vitejs/plugin-react/package.json'\\).version\\)\")",
-      "Bash(python -m pytest tests/ -v)"
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(go build *)"
     ]
   }
 }

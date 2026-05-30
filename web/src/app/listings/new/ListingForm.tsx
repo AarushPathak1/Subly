@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UniversityCombobox } from "@/components/UniversityCombobox";
-import { createListing, getPresignedUrl } from "@/lib/actions";
+import { createListing, updateListing, getPresignedUrl } from "@/lib/actions";
 import { ListingSchema } from "@/lib/schemas";
 
 const inputCls =
@@ -56,12 +56,32 @@ function SectionHeader({ icon, title, subtitle }: { icon: string; title: string;
   );
 }
 
-export default function ListingForm({ onImagesChange }: { onImagesChange?: (count: number) => void }) {
+export interface ListingInitialValues {
+  title?: string;
+  description?: string;
+  address?: string;
+  university_near?: string;
+  rent?: string;
+  bedrooms?: string;
+  bathrooms?: string;
+  available_from?: string;
+  available_to?: string;
+  images?: string[];
+}
+
+interface ListingFormProps {
+  onImagesChange?: (count: number) => void;
+  initialValues?: ListingInitialValues;
+  mode?: "create" | "edit";
+  listingId?: string;
+}
+
+export default function ListingForm({ onImagesChange, initialValues, mode = "create", listingId }: ListingFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  const [images, setImages] = useState<string[]>([]);
+  const [images, setImages] = useState<string[]>(initialValues?.images ?? []);
   const [uploading, setUploading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -127,16 +147,21 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
     images.forEach((url) => formData.append("images", url));
 
     startTransition(async () => {
-      const result = await createListing(null, formData);
+      const action = mode === "edit" && listingId
+        ? updateListing.bind(null, listingId)
+        : createListing;
+      const result = await action(null, formData);
       if (!result) return;
       if ("error" in result) {
         setServerError(result.error);
       } else if ("toast" in result) {
         toast.success(result.toast, {
-          description: "Our AI will review it for quality and flag anything suspicious.",
+          description: mode === "edit"
+            ? "Your changes are live."
+            : "Our AI will review it for quality and flag anything suspicious.",
           duration: 5000,
         });
-        router.push("/dashboard");
+        router.push(mode === "edit" ? "/listings/my" : "/dashboard");
       }
     });
   }
@@ -155,6 +180,7 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
               name="title"
               type="text"
               placeholder="e.g. Sunny 2BR near UT campus, furnished, pet-friendly"
+              defaultValue={initialValues?.title}
               className={inputCls}
             />
             {fieldErrors.title && (
@@ -171,6 +197,7 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
               name="description"
               rows={5}
               placeholder="Tell renters about the space, vibe, nearby amenities, what's included in rent (utilities, wifi, parking)..."
+              defaultValue={initialValues?.description}
               className={`${inputCls} resize-none`}
             />
             {fieldErrors.description && (
@@ -193,6 +220,7 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
               name="address"
               type="text"
               placeholder="123 College Ave, Austin, TX 78701"
+              defaultValue={initialValues?.address}
               className={inputCls}
             />
             {fieldErrors.address && (
@@ -207,6 +235,7 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
             <UniversityCombobox
               name="university_near"
               placeholder="e.g. UT Austin, UCLA, Georgia Tech"
+              defaultValue={initialValues?.university_near}
               className={inputCls}
             />
           </div>
@@ -227,6 +256,7 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
                 min="0"
                 step="50"
                 placeholder="1,200"
+                defaultValue={initialValues?.rent}
                 className={`${inputCls} pl-8`}
               />
             </div>
@@ -239,7 +269,7 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
           </div>
           <div>
             <label className={labelCls}>Bedrooms</label>
-            <select name="bedrooms" defaultValue="1" className={`${inputCls} bg-white cursor-pointer`}>
+            <select name="bedrooms" defaultValue={initialValues?.bedrooms ?? "1"} className={`${inputCls} bg-white cursor-pointer`}>
               <option value="1">1 bedroom</option>
               <option value="2">2 bedrooms</option>
               <option value="3">3 bedrooms</option>
@@ -248,7 +278,7 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
           </div>
           <div>
             <label className={labelCls}>Bathrooms</label>
-            <select name="bathrooms" defaultValue="1" className={`${inputCls} bg-white cursor-pointer`}>
+            <select name="bathrooms" defaultValue={initialValues?.bathrooms ?? "1"} className={`${inputCls} bg-white cursor-pointer`}>
               <option value="1">1 bath</option>
               <option value="1.5">1.5 baths</option>
               <option value="2">2 baths</option>
@@ -258,7 +288,7 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
           </div>
           <div>
             <label className={labelCls}>Available from</label>
-            <input name="available_from" type="date" className={inputCls} />
+            <input name="available_from" type="date" defaultValue={initialValues?.available_from} className={inputCls} />
             {fieldErrors.available_from && (
               <p className={fieldErrorCls}>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="#ef4444" strokeWidth="1.2"/><path d="M6 4v2.5M6 8.5h.01" stroke="#ef4444" strokeWidth="1.2" strokeLinecap="round"/></svg>
@@ -268,7 +298,7 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
           </div>
           <div className="col-span-2">
             <label className={labelCls}>Available until <span className="text-slate-400 font-normal">(optional)</span></label>
-            <input name="available_to" type="date" className={inputCls} />
+            <input name="available_to" type="date" defaultValue={initialValues?.available_to} className={inputCls} />
           </div>
         </div>
       </div>
@@ -346,7 +376,7 @@ export default function ListingForm({ onImagesChange }: { onImagesChange?: (coun
             </svg>
             Posting your sublease...
           </span>
-        ) : uploading ? "Uploading photos..." : "Post sublease →"}
+        ) : uploading ? "Uploading photos..." : mode === "edit" ? "Save changes →" : "Post sublease →"}
       </button>
     </form>
   );

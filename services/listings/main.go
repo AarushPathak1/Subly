@@ -63,18 +63,29 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	rows, err := s.db.Query(ctx,
-		`SELECT id, user_id, title, description, address, university_near,
-		        rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
-		        amenities, images, status, scam_score, created_at, updated_at
-		 FROM listings WHERE status = 'active' ORDER BY created_at DESC LIMIT 50`)
+	const selectCols = `SELECT id, user_id, title, description, address, university_near,
+	              rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
+	              amenities, images, status, scam_score, created_at, updated_at
+	              FROM listings`
+
+	userID := r.URL.Query().Get("user_id")
+	var query string
+	var args []any
+	if userID != "" {
+		query = selectCols + ` WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`
+		args = []any{userID}
+	} else {
+		query = selectCols + ` WHERE status = 'active' ORDER BY created_at DESC LIMIT 50`
+	}
+
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	defer rows.Close()
 
-	var listings []Listing
+	listings := make([]Listing, 0)
 	for rows.Next() {
 		var l Listing
 		if err := rows.Scan(&l.ID, &l.UserID, &l.Title, &l.Description, &l.Address,
@@ -153,21 +164,83 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var body map[string]any
+	userID := r.Header.Get("X-User-ID")
+
+	var body struct {
+		Title          *string  `json:"title"`
+		Description    *string  `json:"description"`
+		Address        *string  `json:"address"`
+		UniversityNear *string  `json:"university_near"`
+		RentCents      *int     `json:"rent_cents"`
+		AvailableFrom  *string  `json:"available_from"`
+		AvailableTo    *string  `json:"available_to"`
+		Bedrooms       *int     `json:"bedrooms"`
+		Bathrooms      *float64 `json:"bathrooms"`
+		Amenities      []string `json:"amenities"`
+		Images         []string `json:"images"`
+		Status         *string  `json:"status"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	// Minimal partial update: only status for now
-	if status, ok := body["status"].(string); ok {
-		_, err := s.db.Exec(r.Context(),
-			`UPDATE listings SET status=$1 WHERE id=$2`, status, id)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
+
+	setClauses := []string{"updated_at = NOW()"}
+	args := []any{}
+	idx := 1
+
+	add := func(col string, val any) {
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", col, idx))
+		args = append(args, val)
+		idx++
+	}
+
+	if body.Title != nil          { add("title", *body.Title) }
+	if body.Description != nil    { add("description", *body.Description) }
+	if body.Address != nil        { add("address", *body.Address) }
+	if body.UniversityNear != nil { add("university_near", *body.UniversityNear) }
+	if body.RentCents != nil      { add("rent_cents", *body.RentCents) }
+	if body.AvailableFrom != nil  { add("available_from", *body.AvailableFrom) }
+	if body.AvailableTo != nil    { add("available_to", *body.AvailableTo) }
+	if body.Bedrooms != nil       { add("bedrooms", *body.Bedrooms) }
+	if body.Bathrooms != nil      { add("bathrooms", *body.Bathrooms) }
+	if body.Amenities != nil      { add("amenities", body.Amenities) }
+	if body.Images != nil         { add("images", body.Images) }
+	if body.Status != nil         { add("status", *body.Status) }
+
+	// Build WHERE: match id, and if gateway provided X-User-ID enforce ownership
+	where := fmt.Sprintf("id = $%d", idx)
+	args = append(args, id)
+	idx++
+	if userID != "" {
+		where += fmt.Sprintf(" AND user_id = $%d", idx)
+		args = append(args, userID)
+	}
+
+	q := fmt.Sprintf("UPDATE listings SET %s WHERE %s",
+		joinStrings(setClauses, ", "), where)
+
+	tag, err := s.db.Exec(r.Context(), q, args...)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("listing not found or not owned by you"))
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+}
+
+func joinStrings(ss []string, sep string) string {
+	result := ""
+	for i, s := range ss {
+		if i > 0 {
+			result += sep
+		}
+		result += s
+	}
+	return result
 }
 
 func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {

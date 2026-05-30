@@ -3,7 +3,7 @@ import { UserButton } from "@clerk/nextjs";
 import { SublyLogo } from "./SublyLogo";
 
 interface AppNavProps {
-  active?: "dashboard" | "new-listing" | "onboarding";
+  active?: "dashboard" | "browse" | "my-listings" | "new-listing" | "onboarding";
 }
 
 export function AppNav({ active }: AppNavProps) {
@@ -23,6 +23,22 @@ export function AppNav({ active }: AppNavProps) {
             }`}
           >
             My matches
+          </Link>
+          <Link
+            href="/listings"
+            className={`text-sm font-medium transition ${
+              active === "browse" ? "text-indigo-600" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            Browse
+          </Link>
+          <Link
+            href="/listings/my"
+            className={`text-sm font-medium transition ${
+              active === "my-listings" ? "text-indigo-600" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            My listings
           </Link>
           <Link
             href="/listings/new"

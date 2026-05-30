@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import ListingForm from "./ListingForm";
+import ListingForm, { type ListingInitialValues } from "./ListingForm";
 
 const PROGRESS_ITEMS = [
   { key: "title", label: "Listing title" },
@@ -13,7 +13,13 @@ const PROGRESS_ITEMS = [
   { key: "photos", label: "At least 1 photo" },
 ];
 
-export function NewListingClient() {
+interface NewListingClientProps {
+  initialValues?: ListingInitialValues;
+  mode?: "create" | "edit";
+  listingId?: string;
+}
+
+export function NewListingClient({ initialValues, mode = "create", listingId }: NewListingClientProps) {
   const [filled, setFilled] = useState<Record<string, boolean>>({});
 
   function handleFormChange(e: React.FormEvent<HTMLDivElement>) {
@@ -39,7 +45,12 @@ export function NewListingClient() {
           className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8"
           onChange={handleFormChange}
         >
-          <ListingForm onImagesChange={handleImagesChange} />
+          <ListingForm
+            onImagesChange={handleImagesChange}
+            initialValues={initialValues}
+            mode={mode}
+            listingId={listingId}
+          />
         </div>
       </div>
 

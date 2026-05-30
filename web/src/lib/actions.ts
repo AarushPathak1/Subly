@@ -122,6 +122,67 @@ export async function createListing(
   return { toast: "Listing queued for AI verification" };
 }
 
+// ─── Update listing (edit) ────────────────────────────────────────────────────
+
+export async function updateListing(
+  listingId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const parsed = ListingSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+
+  const images = formData.getAll("images") as string[];
+
+  const res = await fetch(`${GATEWAY}/api/listings/listings/${listingId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      title: parsed.data.title,
+      description: parsed.data.description,
+      address: parsed.data.address,
+      university_near: parsed.data.university_near,
+      rent_cents: Math.round(parseFloat(parsed.data.rent) * 100),
+      available_from: parsed.data.available_from,
+      available_to: parsed.data.available_to || undefined,
+      bedrooms: parseInt(parsed.data.bedrooms, 10),
+      bathrooms: parseFloat(parsed.data.bathrooms),
+      images,
+    }),
+  });
+
+  if (!res.ok) return { error: "Failed to update listing. Please try again." };
+  return { toast: "Listing updated successfully" };
+}
+
+// ─── Update listing status ────────────────────────────────────────────────────
+
+export async function updateListingStatus(
+  listingId: string,
+  status: "active" | "paused" | "leased"
+): Promise<{ error?: string }> {
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+
+  const res = await fetch(`${GATEWAY}/api/listings/listings/${listingId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ status }),
+  });
+
+  if (!res.ok) return { error: "Failed to update status." };
+  return {};
+}
+
 // ─── Request invite (non-.edu users) ─────────────────────────────────────────
 
 export async function requestInvite(
