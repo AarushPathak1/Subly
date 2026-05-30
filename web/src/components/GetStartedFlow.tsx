@@ -126,7 +126,11 @@ export function GetStartedFlow({ compact = false }: { compact?: boolean }) {
         </div>
       )}
 
-      <InviteModal open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <InviteModal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        onSignUpDirectly={() => { setInviteOpen(false); setModalOpen(true); }}
+      />
     </>
   );
 }

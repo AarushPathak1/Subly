@@ -29,9 +29,10 @@ function SubmitButton() {
 interface Props {
   open: boolean;
   onClose: () => void;
+  onSignUpDirectly?: () => void;
 }
 
-export function InviteModal({ open, onClose }: Props) {
+export function InviteModal({ open, onClose, onSignUpDirectly }: Props) {
   const [state, action] = useFormState(requestInvite, null);
   const overlayRef = useRef<HTMLDivElement>(null);
 
@@ -56,10 +57,10 @@ export function InviteModal({ open, onClose }: Props) {
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 bg-black/50 backdrop-blur-sm overflow-y-auto"
       onMouseDown={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 relative">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 relative my-auto">
         {/* Close */}
         <button
           onClick={onClose}
@@ -120,12 +121,17 @@ export function InviteModal({ open, onClose }: Props) {
           <SubmitButton />
         </form>
 
-        <p className="text-center text-xs text-slate-400 mt-4">
-          Already have a .edu address?{" "}
-          <button onClick={onClose} className="text-indigo-600 font-medium hover:underline">
-            Sign up directly
-          </button>
-        </p>
+        {onSignUpDirectly && (
+          <p className="text-center text-xs text-slate-400 mt-4">
+            Already have a .edu address?{" "}
+            <button
+              onClick={() => { onClose(); onSignUpDirectly(); }}
+              className="text-indigo-600 font-medium hover:underline"
+            >
+              Sign up directly
+            </button>
+          </p>
+        )}
       </div>
     </div>
   );
