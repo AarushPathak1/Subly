@@ -84,10 +84,11 @@ function ListingCard({ listing }: { listing: Listing }) {
 interface BrowseClientProps {
   listings: Listing[];
   universities: string[];
+  defaultUniversity?: string;
 }
 
-export function BrowseClient({ listings, universities }: BrowseClientProps) {
-  const [university, setUniversity] = useState("");
+export function BrowseClient({ listings, universities, defaultUniversity = "" }: BrowseClientProps) {
+  const [university, setUniversity] = useState(defaultUniversity);
   const [maxRent, setMaxRent] = useState("");
   const [minBeds, setMinBeds] = useState("");
 

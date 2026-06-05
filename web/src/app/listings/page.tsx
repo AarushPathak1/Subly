@@ -21,7 +21,7 @@ interface Listing {
 }
 
 export default async function BrowsePage() {
-  await requireEduVerified();
+  const user = await requireEduVerified();
   const { getToken } = auth();
   const token = await getToken();
 
@@ -61,7 +61,7 @@ export default async function BrowsePage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-8">
-        <BrowseClient listings={listings} universities={universities} />
+        <BrowseClient listings={listings} universities={universities} defaultUniversity={user.university ?? ""} />
       </div>
     </div>
   );

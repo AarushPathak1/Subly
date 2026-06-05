@@ -1,6 +1,6 @@
 import { requireEduVerified } from "@/lib/auth";
 import { auth } from "@clerk/nextjs/server";
-import { SublyLogo } from "@/components/SublyLogo";
+import { AppNav } from "@/components/AppNav";
 import Link from "next/link";
 import { NewListingClient } from "./NewListingClient";
 
@@ -17,29 +17,10 @@ export default async function NewListingPage() {
     cache: "no-store",
   });
 
-  const nav = (
-    <nav className="bg-white border-b border-slate-100 px-6 py-3 flex items-center justify-between">
-      <div className="flex items-center gap-4">
-        <Link href="/dashboard" className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          Dashboard
-        </Link>
-        <div className="w-px h-4 bg-slate-200" />
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <SublyLogo size={24} />
-          <span className="text-lg font-bold tracking-tight text-slate-900">Subly</span>
-        </Link>
-      </div>
-      <span className="text-sm text-slate-500">Step 2 of 2 — Post a sublease</span>
-    </nav>
-  );
-
   if (profileRes.status === 404) {
     return (
       <div className="min-h-screen bg-slate-50">
-        {nav}
+        <AppNav active="new-listing" />
         <div className="max-w-2xl mx-auto px-6 py-20 text-center">
           <div className="bg-white border border-violet-100 rounded-2xl p-10 shadow-sm">
             <div className="w-14 h-14 rounded-2xl bg-violet-50 flex items-center justify-center mx-auto mb-5">
@@ -66,7 +47,7 @@ export default async function NewListingPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-slate-50 to-violet-50">
-      {nav}
+      <AppNav active="new-listing" />
 
       {/* Colored banner */}
       <div className="bg-gradient-to-r from-violet-900 via-indigo-900 to-slate-900 px-6 py-10">

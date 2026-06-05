@@ -1,7 +1,6 @@
 import { requireEduVerified } from "@/lib/auth";
 import { auth } from "@clerk/nextjs/server";
-import { SublyLogo } from "@/components/SublyLogo";
-import Link from "next/link";
+import { AppNav } from "@/components/AppNav";
 import { notFound, redirect } from "next/navigation";
 import { NewListingClient } from "../../new/NewListingClient";
 import type { ListingInitialValues } from "../../new/ListingForm";
@@ -58,25 +57,7 @@ export default async function EditListingPage({ params }: { params: { id: string
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-slate-50 to-violet-50">
-      <nav className="bg-white border-b border-slate-100 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link
-            href="/listings/my"
-            className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            My listings
-          </Link>
-          <div className="w-px h-4 bg-slate-200" />
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <SublyLogo size={24} />
-            <span className="text-lg font-bold tracking-tight text-slate-900">Subly</span>
-          </Link>
-        </div>
-        <span className="text-sm text-slate-500">Edit listing</span>
-      </nav>
+      <AppNav active="my-listings" />
 
       <div className="bg-gradient-to-r from-violet-900 via-indigo-900 to-slate-900 px-6 py-10">
         <div className="max-w-5xl mx-auto">
