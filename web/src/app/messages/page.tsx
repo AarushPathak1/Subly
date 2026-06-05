@@ -37,11 +37,10 @@ export default async function MessagesPage() {
   });
 
   const conversations: Conversation[] = res.ok ? await res.json() : [];
-  const totalUnread = conversations.reduce((s, c) => s + c.unread_count, 0);
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <AppNav active="messages" unreadMessages={totalUnread} />
+      <AppNav active="messages" />
 
       <div className="max-w-2xl mx-auto px-6 py-8">
         <h1 className="text-2xl font-extrabold text-slate-900 mb-6">Messages</h1>
