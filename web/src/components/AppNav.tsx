@@ -11,10 +11,23 @@ export function AppNav({ active, unreadMessages = 0 }: AppNavProps) {
   return (
     <nav className="sticky top-0 z-50 bg-slate-900 border-b border-slate-800">
       <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
-        <Link href="/dashboard" className="flex items-center gap-2.5">
-          <SublyLogo />
-          <span className="text-xl font-bold tracking-tight text-white">Subly</span>
-        </Link>
+        <div className="flex items-center gap-3">
+          {active !== "dashboard" && (
+            <Link
+              href="/dashboard"
+              className="flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              title="Back to My matches"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </Link>
+          )}
+          <Link href="/dashboard" className="flex items-center gap-2.5">
+            <SublyLogo />
+            <span className="text-xl font-bold tracking-tight text-white">Subly</span>
+          </Link>
+        </div>
 
         <div className="flex items-center gap-6">
           <Link
