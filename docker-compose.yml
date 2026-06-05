@@ -183,8 +183,7 @@ services:
   web:
     build:
       context: ./web
-      dockerfile: Dockerfile
-    command: npm run dev
+      dockerfile: Dockerfile.dev
     container_name: subly-web
     restart: unless-stopped
     ports:
