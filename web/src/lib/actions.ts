@@ -208,6 +208,83 @@ export async function requestInvite(
   return { toast: "You're on the list! We'll email you when a spot opens up." };
 }
 
+// ─── Messaging ───────────────────────────────────────────────────────────────
+
+export interface ConversationDetail {
+  id: string;
+  listing_id: string;
+  listing_title: string;
+  renter_id: string;
+  lister_id: string;
+  other_email: string;
+  last_message_at?: string;
+  created_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  body: string;
+  created_at: string;
+}
+
+export async function startConversation(listingId: string): Promise<void> {
+  const token = await getBearerToken();
+  if (!token) throw new Error("Not signed in");
+
+  const res = await fetch(`${GATEWAY}/api/messages/conversations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ listing_id: listingId }),
+  });
+
+  if (!res.ok) throw new Error("Failed to start conversation");
+  const data = await res.json();
+  redirect(`/messages/${data.id}`);
+}
+
+export async function fetchConversation(conversationId: string): Promise<ConversationDetail | null> {
+  const token = await getBearerToken();
+  if (!token) return null;
+
+  const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function fetchMessages(conversationId: string): Promise<ChatMessage[]> {
+  const token = await getBearerToken();
+  if (!token) return [];
+
+  const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/messages`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function sendMessage(
+  conversationId: string,
+  body: string
+): Promise<{ error?: string }> {
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+
+  const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ body }),
+  });
+
+  if (!res.ok) return { error: "Failed to send message" };
+  return {};
+}
+
 // ─── S3 pre-signed upload URL ─────────────────────────────────────────────────
 
 export async function getPresignedUrl(

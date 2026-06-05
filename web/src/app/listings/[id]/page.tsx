@@ -1,6 +1,7 @@
 import { requireEduVerified } from "@/lib/auth";
 import { auth } from "@clerk/nextjs/server";
 import { AppNav } from "@/components/AppNav";
+import { startConversation } from "@/lib/actions";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -52,7 +53,7 @@ function formatDate(d?: string) {
 }
 
 export default async function ListingDetailPage({ params }: { params: { id: string } }) {
-  await requireEduVerified();
+  const user = await requireEduVerified();
   const { getToken } = auth();
   const token = await getToken();
 
@@ -202,9 +203,19 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
 
             {/* CTA */}
             <div className="flex flex-wrap gap-3 pt-6 border-t border-slate-100">
+              {user.id !== listing.user_id && (
+                <form action={startConversation.bind(null, listing.id)}>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition"
+                  >
+                    Message lister
+                  </button>
+                </form>
+              )}
               <Link
                 href="/dashboard"
-                className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition"
+                className="px-5 py-2.5 bg-slate-100 text-slate-700 text-sm font-semibold rounded-xl hover:bg-slate-200 transition"
               >
                 Back to my matches
               </Link>

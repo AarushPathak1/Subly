@@ -7,8 +7,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -35,6 +37,27 @@ type Listing struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+type Conversation struct {
+	ID            string     `json:"id"`
+	ListingID     string     `json:"listing_id"`
+	ListingTitle  string     `json:"listing_title"`
+	RenterID      string     `json:"renter_id"`
+	ListerID      string     `json:"lister_id"`
+	OtherEmail    string     `json:"other_email"`
+	LastMessageAt *time.Time `json:"last_message_at,omitempty"`
+	LastMessage   string     `json:"last_message"`
+	UnreadCount   int        `json:"unread_count"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+type Message struct {
+	ID             string    `json:"id"`
+	ConversationID string    `json:"conversation_id"`
+	SenderID       string    `json:"sender_id"`
+	Body           string    `json:"body"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 type server struct {
@@ -52,6 +75,11 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /listings/{id}", s.handleGet)
 	mux.HandleFunc("PATCH /listings/{id}", s.handleUpdate)
 	mux.HandleFunc("DELETE /listings/{id}", s.handleDelete)
+	mux.HandleFunc("POST /conversations", s.handleCreateConversation)
+	mux.HandleFunc("GET /conversations", s.handleListConversations)
+	mux.HandleFunc("GET /conversations/{id}", s.handleGetConversation)
+	mux.HandleFunc("GET /conversations/{id}/messages", s.handleGetMessages)
+	mux.HandleFunc("POST /conversations/{id}/messages", s.handleSendMessage)
 	return mux
 }
 
@@ -251,6 +279,242 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ─── Conversation handlers ───────────────────────────────────────────────────
+
+func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	var body struct {
+		ListingID string `json:"listing_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ListingID == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("listing_id required"))
+		return
+	}
+	ctx := r.Context()
+
+	var listerID string
+	err := s.db.QueryRow(ctx, `SELECT user_id FROM listings WHERE id = $1`, body.ListingID).Scan(&listerID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("listing not found"))
+		return
+	}
+	if listerID == userID {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cannot message your own listing"))
+		return
+	}
+
+	// Insert or get existing — upsert trick: DO UPDATE with a no-op to get RETURNING on conflict
+	var convID string
+	err = s.db.QueryRow(ctx, `
+		INSERT INTO conversations (listing_id, renter_id, lister_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (listing_id, renter_id) DO UPDATE SET listing_id = EXCLUDED.listing_id
+		RETURNING id`,
+		body.ListingID, userID, listerID,
+	).Scan(&convID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": convID})
+}
+
+func (s *server) handleListConversations(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	rows, err := s.db.Query(r.Context(), `
+		SELECT
+			c.id, c.listing_id, l.title,
+			c.renter_id, c.lister_id,
+			CASE WHEN c.renter_id = $1 THEN ul.email ELSE ur.email END,
+			c.last_message_at, c.created_at,
+			COALESCE(m.body, ''),
+			COALESCE(unread.cnt, 0)::int
+		FROM conversations c
+		JOIN listings l  ON l.id  = c.listing_id
+		JOIN users ur    ON ur.id = c.renter_id
+		JOIN users ul    ON ul.id = c.lister_id
+		LEFT JOIN LATERAL (
+			SELECT body FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1
+		) m ON true
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::int AS cnt FROM messages
+			WHERE conversation_id = c.id
+			  AND sender_id != $1
+			  AND created_at > COALESCE(
+				  CASE WHEN c.renter_id = $1 THEN c.renter_read_at ELSE c.lister_read_at END,
+				  '-infinity'::timestamptz
+			  )
+		) unread ON true
+		WHERE c.renter_id = $1 OR c.lister_id = $1
+		ORDER BY COALESCE(c.last_message_at, c.created_at) DESC`,
+		userID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer rows.Close()
+
+	convs := make([]Conversation, 0)
+	for rows.Next() {
+		var c Conversation
+		var lastMsgAt *time.Time
+		if err := rows.Scan(&c.ID, &c.ListingID, &c.ListingTitle,
+			&c.RenterID, &c.ListerID, &c.OtherEmail,
+			&lastMsgAt, &c.CreatedAt, &c.LastMessage, &c.UnreadCount); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		c.LastMessageAt = lastMsgAt
+		convs = append(convs, c)
+	}
+	writeJSON(w, http.StatusOK, convs)
+}
+
+func (s *server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	var c Conversation
+	var lastMsgAt *time.Time
+	err := s.db.QueryRow(r.Context(), `
+		SELECT c.id, c.listing_id, l.title,
+		       c.renter_id, c.lister_id,
+		       CASE WHEN c.renter_id = $2 THEN ul.email ELSE ur.email END,
+		       c.last_message_at, c.created_at, '', 0
+		FROM conversations c
+		JOIN listings l  ON l.id  = c.listing_id
+		JOIN users ur    ON ur.id = c.renter_id
+		JOIN users ul    ON ul.id = c.lister_id
+		WHERE c.id = $1 AND (c.renter_id = $2 OR c.lister_id = $2)`,
+		id, userID,
+	).Scan(&c.ID, &c.ListingID, &c.ListingTitle,
+		&c.RenterID, &c.ListerID, &c.OtherEmail,
+		&lastMsgAt, &c.CreatedAt, &c.LastMessage, &c.UnreadCount)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		return
+	}
+	c.LastMessageAt = lastMsgAt
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (s *server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	ctx := r.Context()
+
+	// Verify user is a party and mark as read
+	var renterID, listerID string
+	err := s.db.QueryRow(ctx, `SELECT renter_id, lister_id FROM conversations WHERE id = $1`, id).Scan(&renterID, &listerID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		return
+	}
+	if renterID != userID && listerID != userID {
+		writeErr(w, http.StatusForbidden, fmt.Errorf("access denied"))
+		return
+	}
+
+	col := "lister_read_at"
+	if renterID == userID {
+		col = "renter_read_at"
+	}
+	s.db.Exec(ctx, fmt.Sprintf(`UPDATE conversations SET %s = NOW() WHERE id = $1`, col), id)
+
+	rows, err := s.db.Query(ctx,
+		`SELECT id, conversation_id, sender_id, body, created_at
+		 FROM messages WHERE conversation_id = $1
+		 ORDER BY created_at ASC LIMIT 100`, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer rows.Close()
+
+	msgs := make([]Message, 0)
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Body, &m.CreatedAt); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		msgs = append(msgs, m)
+	}
+	writeJSON(w, http.StatusOK, msgs)
+}
+
+func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	var body struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Body) == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("body required"))
+		return
+	}
+	ctx := r.Context()
+
+	var renterID, listerID string
+	err := s.db.QueryRow(ctx, `SELECT renter_id, lister_id FROM conversations WHERE id = $1`, id).Scan(&renterID, &listerID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		return
+	}
+	if renterID != userID && listerID != userID {
+		writeErr(w, http.StatusForbidden, fmt.Errorf("access denied"))
+		return
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	var msg Message
+	err = tx.QueryRow(ctx,
+		`INSERT INTO messages (conversation_id, sender_id, body)
+		 VALUES ($1, $2, $3) RETURNING id, conversation_id, sender_id, body, created_at`,
+		id, userID, strings.TrimSpace(body.Body),
+	).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Body, &msg.CreatedAt)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE conversations SET last_message_at = NOW() WHERE id = $1`, id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, msg)
 }
 
 // ─── MQ helpers ──────────────────────────────────────────────────────────────

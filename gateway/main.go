@@ -103,6 +103,7 @@ func main() {
 	routes := []route{
 		{prefix: "/api/auth", upstream: authURL},
 		{prefix: "/api/listings", upstream: listingsURL},
+		{prefix: "/api/messages", upstream: listingsURL},
 		{prefix: "/api/matching", upstream: matchingURL},
 	}
 
@@ -117,7 +118,7 @@ func main() {
 		prefix := rt.prefix
 		proxy := newReverseProxy(rt.upstream)
 		var h http.Handler = http.StripPrefix(prefix, proxy)
-		if prefix == "/api/listings" {
+		if prefix == "/api/listings" || prefix == "/api/messages" {
 			h = authMiddleware(authURL.String(), h)
 		}
 		mux.Handle(prefix+"/", h)

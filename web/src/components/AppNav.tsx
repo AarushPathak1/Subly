@@ -3,10 +3,11 @@ import { UserButton } from "@clerk/nextjs";
 import { SublyLogo } from "./SublyLogo";
 
 interface AppNavProps {
-  active?: "dashboard" | "browse" | "my-listings" | "new-listing" | "onboarding";
+  active?: "dashboard" | "browse" | "my-listings" | "new-listing" | "onboarding" | "messages";
+  unreadMessages?: number;
 }
 
-export function AppNav({ active }: AppNavProps) {
+export function AppNav({ active, unreadMessages = 0 }: AppNavProps) {
   return (
     <nav className="sticky top-0 z-50 bg-slate-900 border-b border-slate-800">
       <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
@@ -49,6 +50,17 @@ export function AppNav({ active }: AppNavProps) {
             }`}
           >
             Post sublease
+          </Link>
+          <Link
+            href="/messages"
+            className={`relative text-sm font-medium transition ${
+              active === "messages" ? "text-indigo-400" : "text-slate-400 hover:text-white"
+            }`}
+          >
+            Messages
+            {unreadMessages > 0 && (
+              <span className="absolute -top-1 -right-2 w-2 h-2 rounded-full bg-indigo-500" />
+            )}
           </Link>
           <Link
             href="/onboarding"

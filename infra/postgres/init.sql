@@ -58,12 +58,19 @@ CREATE INDEX IF NOT EXISTS user_profiles_user_id_idx ON user_profiles(user_id);
 
 -- ─── Conversations ──────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS conversations (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    listing_id  UUID REFERENCES listings(id) ON DELETE CASCADE,
-    renter_id   UUID REFERENCES users(id) ON DELETE CASCADE,
-    lister_id   UUID REFERENCES users(id) ON DELETE CASCADE,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    listing_id      UUID REFERENCES listings(id) ON DELETE CASCADE,
+    renter_id       UUID REFERENCES users(id) ON DELETE CASCADE,
+    lister_id       UUID REFERENCES users(id) ON DELETE CASCADE,
+    renter_read_at  TIMESTAMPTZ,
+    lister_read_at  TIMESTAMPTZ,
+    last_message_at TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT conversations_listing_renter_unique UNIQUE (listing_id, renter_id)
 );
+
+CREATE INDEX IF NOT EXISTS conversations_renter_idx ON conversations(renter_id);
+CREATE INDEX IF NOT EXISTS conversations_lister_idx ON conversations(lister_id);
 
 CREATE TABLE IF NOT EXISTS messages (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -72,6 +79,8 @@ CREATE TABLE IF NOT EXISTS messages (
     body            TEXT NOT NULL,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS messages_conv_created_idx ON messages(conversation_id, created_at);
 
 -- ─── Trigger: updated_at ────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION set_updated_at()
