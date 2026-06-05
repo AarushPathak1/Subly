@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useClerk } from "@clerk/nextjs";
 import { InviteModal } from "./InviteModal";
-import { AppNav } from "./AppNav";
+import { AppNavUI } from "./AppNav";
 
 export function NonEduGate({ email }: { email: string | null }) {
   const [open, setOpen] = useState(false);
@@ -11,7 +11,7 @@ export function NonEduGate({ email }: { email: string | null }) {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <AppNav />
+      <AppNavUI />
       <div className="max-w-lg mx-auto px-6 py-20">
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-10 text-center">
           <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center mx-auto mb-5">
