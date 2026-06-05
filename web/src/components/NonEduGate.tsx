@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useClerk } from "@clerk/nextjs";
 import { InviteModal } from "./InviteModal";
-import { AppNavUI } from "./AppNav";
+import { AppNavUI } from "./AppNavUI";
 
 export function NonEduGate({ email }: { email: string | null }) {
   const [open, setOpen] = useState(false);
