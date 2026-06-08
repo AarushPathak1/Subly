@@ -72,6 +72,7 @@ describe("AppNavUI", () => {
       expect(screen.getByRole("link", { name: "Post sublease" })).toHaveAttribute("href", "/listings/new");
       expect(screen.getByRole("link", { name: "Messages" })).toHaveAttribute("href", "/messages");
       expect(screen.getByRole("link", { name: "Preferences" })).toHaveAttribute("href", "/onboarding");
+      expect(screen.getByRole("link", { name: "My profile" })).toHaveAttribute("href", "/profile");
     });
 
     it("renders the Subly logo", () => {
