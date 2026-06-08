@@ -499,8 +499,12 @@ func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	var renterID, listerID string
-	err := s.db.QueryRow(ctx, `SELECT renter_id, lister_id FROM conversations WHERE id = $1`, id).Scan(&renterID, &listerID)
+	var renterID, listerID, listingTitle string
+	err := s.db.QueryRow(ctx, `
+		SELECT c.renter_id, c.lister_id, l.title
+		FROM conversations c
+		JOIN listings l ON l.id = c.listing_id
+		WHERE c.id = $1`, id).Scan(&renterID, &listerID, &listingTitle)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
@@ -537,6 +541,18 @@ func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	recipientID := listerID
+	if userID == listerID {
+		recipientID = renterID
+	}
+	s.publishNotification("notifications.new_message", map[string]string{
+		"recipient_id":    recipientID,
+		"sender_id":       userID,
+		"listing_title":   listingTitle,
+		"conversation_id": id,
+	})
+
 	writeJSON(w, http.StatusCreated, msg)
 }
 
@@ -557,8 +573,12 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 	}
 	ctx := r.Context()
 
-	var listerID string
-	if err := s.db.QueryRow(ctx, `SELECT lister_id FROM conversations WHERE id = $1`, id).Scan(&listerID); err != nil {
+	var listerID, renterID, listingTitle string
+	if err := s.db.QueryRow(ctx, `
+		SELECT c.lister_id, c.renter_id, l.title
+		FROM conversations c
+		JOIN listings l ON l.id = c.listing_id
+		WHERE c.id = $1`, id).Scan(&listerID, &renterID, &listingTitle); err != nil {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}
@@ -579,6 +599,15 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	s.publishNotification("notifications.match_confirmed", map[string]interface{}{
+		"lister_id":          listerID,
+		"renter_id":          renterID,
+		"listing_title":      listingTitle,
+		"conversation_id":    id,
+		"includes_agreement": body.IncludesAgreement,
+	})
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "confirmed"})
 }
 
@@ -607,13 +636,27 @@ func (s *server) handleGetUserProfile(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) startExpirationWorker() {
 	expire := func() {
-		_, err := s.db.Exec(context.Background(), `
+		rows, err := s.db.Query(context.Background(), `
 			UPDATE listings SET status = 'expired'
 			WHERE status = 'active'
 			  AND available_to IS NOT NULL
-			  AND available_to < CURRENT_DATE`)
+			  AND available_to < CURRENT_DATE
+			RETURNING id, user_id, title`)
 		if err != nil {
 			log.Printf("[listings] expiration worker: %v", err)
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var listingID, listerID, title string
+			if err := rows.Scan(&listingID, &listerID, &title); err != nil {
+				continue
+			}
+			s.publishNotification("notifications.listing_expired", map[string]string{
+				"lister_id":     listerID,
+				"listing_id":    listingID,
+				"listing_title": title,
+			})
 		}
 	}
 	expire()
@@ -625,6 +668,20 @@ func (s *server) startExpirationWorker() {
 }
 
 // ─── MQ helpers ──────────────────────────────────────────────────────────────
+
+func (s *server) publishNotification(queue string, payload interface{}) {
+	if s.mq == nil {
+		return
+	}
+	data, _ := json.Marshal(payload)
+	if err := s.mq.Publish("", queue, false, false, amqp.Publishing{
+		ContentType:  "application/json",
+		DeliveryMode: amqp.Persistent,
+		Body:         data,
+	}); err != nil {
+		log.Printf("[listings] failed to publish to %s: %v", queue, err)
+	}
+}
 
 func (s *server) publishScamCheck(listingID string) {
 	if s.mq == nil {
@@ -688,6 +745,9 @@ func main() {
 		mqCh, _ = mqConn.Channel()
 		mqCh.QueueDeclare("listing.scam_check", true, false, false, false, nil)
 		mqCh.QueueDeclare("listings.new", true, false, false, false, nil)
+		mqCh.QueueDeclare("notifications.new_message", true, false, false, false, nil)
+		mqCh.QueueDeclare("notifications.match_confirmed", true, false, false, false, nil)
+		mqCh.QueueDeclare("notifications.listing_expired", true, false, false, false, nil)
 		defer mqConn.Close()
 	}
 

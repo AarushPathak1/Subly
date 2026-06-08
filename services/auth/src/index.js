@@ -10,6 +10,193 @@ const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
 
+const APP_URL = process.env.APP_URL || "http://localhost:3000";
+const FROM = process.env.FROM_EMAIL || "Subly <onboarding@resend.dev>";
+
+async function getUserEmail(userId) {
+  const { rows } = await db.query("SELECT email FROM users WHERE id = $1", [userId]);
+  return rows[0]?.email ?? null;
+}
+
+async function sendNewMessageEmail({ recipientId, listingTitle, conversationId }) {
+  if (!resend) return;
+  const to = await getUserEmail(recipientId);
+  if (!to) return;
+  await resend.emails.send({
+    from: FROM,
+    to,
+    subject: `New message about "${listingTitle}"`,
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#fff">
+        <div style="margin-bottom:28px">
+          <span style="font-size:22px;font-weight:800;color:#1e1b4b;letter-spacing:-0.5px">Subly</span>
+        </div>
+        <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">You have a new message</h1>
+        <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 24px">
+          Someone sent you a message about <strong>${listingTitle}</strong>. Reply to keep the conversation going.
+        </p>
+        <a href="${APP_URL}/messages/${conversationId}"
+          style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
+          View message →
+        </a>
+        <p style="color:#94a3b8;font-size:12px;margin-top:32px;line-height:1.5">
+          You're receiving this because you have an active conversation on Subly.
+        </p>
+      </div>
+    `,
+  });
+  console.log(`[auth] new message email sent to ${to}`);
+}
+
+async function sendMatchConfirmedEmail({ listerId, renterId, listingTitle, conversationId, includesAgreement }) {
+  if (!resend) return;
+  const [listerEmail, renterEmail] = await Promise.all([
+    getUserEmail(listerId),
+    getUserEmail(renterId),
+  ]);
+
+  const agreementNote = includesAgreement
+    ? `<p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 16px">Your sublease agreement has been generated and is available in the conversation.</p>`
+    : "";
+
+  if (listerEmail) {
+    await resend.emails.send({
+      from: FROM,
+      to: listerEmail,
+      subject: `Match confirmed for "${listingTitle}"`,
+      html: `
+        <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#fff">
+          <div style="margin-bottom:28px">
+            <span style="font-size:22px;font-weight:800;color:#1e1b4b;letter-spacing:-0.5px">Subly</span>
+          </div>
+          <div style="width:48px;height:48px;border-radius:50%;background:#d1fae5;display:flex;align-items:center;justify-content:center;margin-bottom:20px">
+            <span style="font-size:24px">✓</span>
+          </div>
+          <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">Match confirmed — payment received</h1>
+          <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px">
+            Your match for <strong>${listingTitle}</strong> is confirmed. The renter has been notified.
+          </p>
+          ${agreementNote}
+          <a href="${APP_URL}/messages/${conversationId}"
+            style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
+            View conversation →
+          </a>
+          <p style="color:#94a3b8;font-size:12px;margin-top:32px;line-height:1.5">
+            You're receiving this because you confirmed a match on Subly.
+          </p>
+        </div>
+      `,
+    });
+    console.log(`[auth] match confirmed email sent to lister ${listerEmail}`);
+  }
+
+  if (renterEmail) {
+    await resend.emails.send({
+      from: FROM,
+      to: renterEmail,
+      subject: `Great news — your match is confirmed!`,
+      html: `
+        <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#fff">
+          <div style="margin-bottom:28px">
+            <span style="font-size:22px;font-weight:800;color:#1e1b4b;letter-spacing:-0.5px">Subly</span>
+          </div>
+          <div style="width:48px;height:48px;border-radius:50%;background:#d1fae5;display:flex;align-items:center;justify-content:center;margin-bottom:20px">
+            <span style="font-size:24px">✓</span>
+          </div>
+          <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">Your sublease match is confirmed</h1>
+          <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px">
+            The lister has officially confirmed your match for <strong>${listingTitle}</strong>. Reach out to coordinate next steps.
+          </p>
+          ${agreementNote}
+          <a href="${APP_URL}/messages/${conversationId}"
+            style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
+            View conversation →
+          </a>
+          <p style="color:#94a3b8;font-size:12px;margin-top:32px;line-height:1.5">
+            You're receiving this because you have a confirmed sublease match on Subly.
+          </p>
+        </div>
+      `,
+    });
+    console.log(`[auth] match confirmed email sent to renter ${renterEmail}`);
+  }
+}
+
+async function sendListingExpiredEmail({ listerId, listingId, listingTitle }) {
+  if (!resend) return;
+  const to = await getUserEmail(listerId);
+  if (!to) return;
+  await resend.emails.send({
+    from: FROM,
+    to,
+    subject: `Your listing "${listingTitle}" has expired`,
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#fff">
+        <div style="margin-bottom:28px">
+          <span style="font-size:22px;font-weight:800;color:#1e1b4b;letter-spacing:-0.5px">Subly</span>
+        </div>
+        <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">Your listing has expired</h1>
+        <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 24px">
+          <strong>${listingTitle}</strong> has passed its available-until date and is no longer visible to renters.
+          If you're still looking for someone, update the dates and repost it — it only takes a minute.
+        </p>
+        <a href="${APP_URL}/listings/${listingId}/edit"
+          style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
+          Repost listing →
+        </a>
+        <p style="color:#94a3b8;font-size:12px;margin-top:32px;line-height:1.5">
+          You're receiving this because you have a listing on Subly.
+        </p>
+      </div>
+    `,
+  });
+  console.log(`[auth] listing expired email sent to ${to}`);
+}
+
+async function consumeNotifications(ch) {
+  await ch.assertQueue("notifications.new_message", { durable: true });
+  await ch.assertQueue("notifications.match_confirmed", { durable: true });
+  await ch.assertQueue("notifications.listing_expired", { durable: true });
+
+  ch.consume("notifications.new_message", async (msg) => {
+    if (!msg) return;
+    try {
+      const { recipient_id, listing_title, conversation_id } = JSON.parse(msg.content.toString());
+      await sendNewMessageEmail({ recipientId: recipient_id, listingTitle: listing_title, conversationId: conversation_id });
+    } catch (err) {
+      console.error("[auth] new_message notification error:", err);
+    } finally {
+      ch.ack(msg);
+    }
+  });
+
+  ch.consume("notifications.match_confirmed", async (msg) => {
+    if (!msg) return;
+    try {
+      const { lister_id, renter_id, listing_title, conversation_id, includes_agreement } = JSON.parse(msg.content.toString());
+      await sendMatchConfirmedEmail({ listerId: lister_id, renterId: renter_id, listingTitle: listing_title, conversationId: conversation_id, includesAgreement: includes_agreement });
+    } catch (err) {
+      console.error("[auth] match_confirmed notification error:", err);
+    } finally {
+      ch.ack(msg);
+    }
+  });
+
+  ch.consume("notifications.listing_expired", async (msg) => {
+    if (!msg) return;
+    try {
+      const { lister_id, listing_id, listing_title } = JSON.parse(msg.content.toString());
+      await sendListingExpiredEmail({ listerId: lister_id, listingId: listing_id, listingTitle: listing_title });
+    } catch (err) {
+      console.error("[auth] listing_expired notification error:", err);
+    } finally {
+      ch.ack(msg);
+    }
+  });
+
+  console.log("[auth] notification consumers registered");
+}
+
 async function sendInviteEmail({ to, universityName, magicLink }) {
   if (!resend) {
     console.log(`[auth] RESEND_API_KEY not set — magic link for ${to}: ${magicLink}`);
@@ -57,6 +244,7 @@ async function connectMQ() {
   const conn = await amqp.connect(process.env.RABBITMQ_URL);
   channel = await conn.createChannel();
   await channel.assertQueue("user.registered", { durable: true });
+  await consumeNotifications(channel);
   console.log("[auth] RabbitMQ connected");
 }
 
