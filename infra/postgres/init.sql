@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- ─── Listings ───────────────────────────────────────────────────────────────
-CREATE TYPE listing_status AS ENUM ('draft', 'active', 'paused', 'leased');
+CREATE TYPE listing_status AS ENUM ('draft', 'active', 'paused', 'leased', 'expired');
 
 CREATE TABLE IF NOT EXISTS listings (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

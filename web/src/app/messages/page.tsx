@@ -8,6 +8,8 @@ const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?
 interface Conversation {
   id: string;
   listing_title: string;
+  renter_id: string;
+  lister_id: string;
   other_email: string;
   last_message: string;
   last_message_at?: string;
@@ -27,7 +29,7 @@ function relativeTime(iso?: string): string {
 }
 
 export default async function MessagesPage() {
-  await requireEduVerified();
+  const user = await requireEduVerified();
   const { getToken } = auth();
   const token = await getToken();
 
@@ -54,28 +56,33 @@ export default async function MessagesPage() {
           </div>
         ) : (
           <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
-            {conversations.map((c) => (
-              <Link key={c.id} href={`/messages/${c.id}`} className="flex items-start gap-4 px-5 py-4 hover:bg-slate-50 transition">
-                <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center shrink-0 mt-0.5">
-                  <span className="text-indigo-700 font-bold text-sm">
-                    {c.other_email[0].toUpperCase()}
-                  </span>
+            {conversations.map((c) => {
+              const otherUserId = c.renter_id === user.id ? c.lister_id : c.renter_id;
+              return (
+                <div key={c.id} className="flex items-start gap-4 px-5 py-4 hover:bg-slate-50 transition">
+                  <Link href={`/users/${otherUserId}`} className="shrink-0 mt-0.5" onClick={(e) => e.stopPropagation()}>
+                    <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center hover:ring-2 hover:ring-indigo-300 transition">
+                      <span className="text-indigo-700 font-bold text-sm">
+                        {c.other_email[0].toUpperCase()}
+                      </span>
+                    </div>
+                  </Link>
+                  <Link href={`/messages/${c.id}`} className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-0.5">
+                      <span className="text-sm font-semibold text-slate-900 truncate">{c.listing_title}</span>
+                      <span className="text-xs text-slate-400 shrink-0">{relativeTime(c.last_message_at ?? c.created_at)}</span>
+                    </div>
+                    <p className="text-xs text-slate-500 truncate mb-0.5">{c.other_email}</p>
+                    <p className="text-sm text-slate-600 truncate">
+                      {c.last_message || <span className="italic text-slate-400">No messages yet</span>}
+                    </p>
+                  </Link>
+                  {c.unread_count > 0 && (
+                    <span className="w-2 h-2 rounded-full bg-indigo-500 mt-2 shrink-0" />
+                  )}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2 mb-0.5">
-                    <span className="text-sm font-semibold text-slate-900 truncate">{c.listing_title}</span>
-                    <span className="text-xs text-slate-400 shrink-0">{relativeTime(c.last_message_at ?? c.created_at)}</span>
-                  </div>
-                  <p className="text-xs text-slate-500 truncate mb-0.5">{c.other_email}</p>
-                  <p className="text-sm text-slate-600 truncate">
-                    {c.last_message || <span className="italic text-slate-400">No messages yet</span>}
-                  </p>
-                </div>
-                {c.unread_count > 0 && (
-                  <span className="w-2 h-2 rounded-full bg-indigo-500 mt-2 shrink-0" />
-                )}
-              </Link>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

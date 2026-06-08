@@ -1,6 +1,6 @@
 # Subly — Student Subleasing Marketplace
 
-A trust-first sublease platform built exclusively for verified students. Every listing is invite-gated and `.edu`-verified, AI-embedded for semantic search, and scored for fraud before it reaches a renter.
+A trust-first sublease platform built exclusively for verified university students. Every listing is invite-gated, `.edu`-verified, AI-matched for semantic compatibility, and scored for fraud before it reaches a renter. When both parties are ready to move forward, listers confirm the match through Subly — paying a flat fee based on the listed rent, with an optional sublease agreement add-on.
 
 ---
 
@@ -28,11 +28,12 @@ graph TD
     end
 
     subgraph Storage
-        PG[("PostgreSQL 16\nusers · listings\nuser_profiles\ninvite_requests")]
+        PG[("PostgreSQL 16\nusers · listings\nuser_profiles · conversations\nmessages · invite_requests")]
         PINECONE[("Pinecone\nvector index\n1536-dim cosine")]
         S3[("AWS S3\nlisting images")]
     end
 
+    STRIPE["Stripe\nHosted Checkout"]
     RESEND["Resend\nTransactional Email"]
     OPENAI["OpenAI\ngpt-4o-mini + text-embedding-3-small"]
 
@@ -46,7 +47,7 @@ graph TD
     AUTH -->|"upsert user / invite_requests"| PG
     AUTH -->|"magic link email"| RESEND
 
-    LISTINGS -->|"INSERT listing"| PG
+    LISTINGS -->|"INSERT listing / conversation / message"| PG
     LISTINGS -->|"full payload"| Q1
     LISTINGS -->|"listing_id"| Q2
 
@@ -63,6 +64,8 @@ graph TD
     TRUST -->|"UPDATE scam_score, status=active"| PG
 
     Browser -->|"PUT image (pre-signed)"| S3
+    Browser -->|"Checkout redirect"| STRIPE
+    STRIPE -->|"session webhook"| Browser
 ```
 
 ### Request flow — posting a listing
@@ -72,6 +75,22 @@ Browser → Gateway (auth check) → Listings Service → Postgres (draft)
                                                    ↓
                                       listings.new ──→ Matching (embed → Pinecone)
                                listing.scam_check ──→ Trust (score → Postgres, status=active)
+```
+
+### Messaging and payment flow
+
+```
+Renter clicks "Message lister" on listing detail
+  → Listings Service: upsert conversation (listing_id, renter_id) — idempotent
+  → Thread opens with 5s polling
+
+Both parties chat in-app
+  → Lister clicks "Confirm this match" → fee panel shown (tier based on initial rent)
+  → Optional: +$19 sublease agreement add-on
+  → Browser → Stripe Checkout (hosted)
+  → Stripe redirects to /messages/{id}/confirmed?session_id=...
+  → Server action verifies Stripe session → Listings Service marks confirmed_at
+  → Thread shows confirmed banner; agreement template rendered if purchased
 ```
 
 ### Invite flow — joining the platform
@@ -90,88 +109,35 @@ Visitor clicks magic link → /signup?token=X → verifies token
 
 | Layer | Technology | Why |
 |---|---|---|
-| **Frontend** | Next.js 14 App Router | Server Components eliminate client/server waterfalls for auth-gated pages. Server Actions replace API routes for form submissions, keeping auth logic server-side and credentials out of the browser. |
-| **API Gateway** | Go | Go's goroutine-per-request model handles high concurrency with minimal memory overhead — ideal for a reverse proxy that validates a Clerk session on every inbound request before forwarding. |
-| **Auth Service** | Node.js + Clerk | Clerk handles OAuth, MFA, and session management. `.edu` domain verification is the platform's core trust primitive. Invite-gated signup flow with HMAC-signed magic links prevents unauthorized access. |
-| **Listings Service** | Go + pgx | Type-safe Postgres driver with connection pooling. Publishes to two RabbitMQ queues on every write. Partial-update `PATCH` with dynamic `SET` clause and ownership enforcement via `X-User-ID`. |
-| **Matching Service** | Python + FastAPI | Python is the lingua franca for ML tooling. FastAPI's async support lets the service run a RabbitMQ consumer and serve HTTP traffic in the same process without threads. |
+| **Frontend** | Next.js 14 App Router | Server Components eliminate client/server waterfalls for auth-gated pages. Server Actions replace API routes for form submissions, keeping auth logic server-side. Split `AppNav` (async server, fetches unread count) / `AppNavUI` (pure presentational, safe in client trees) avoids the server-only import constraint. |
+| **API Gateway** | Go | Goroutine-per-request handles high concurrency with minimal memory overhead — ideal for a reverse proxy that validates a Clerk session on every inbound request before forwarding. |
+| **Auth Service** | Node.js + Clerk | Clerk handles OAuth, MFA, and session management. `.edu` domain verification is the platform's core trust primitive. Invite-gated signup with HMAC-signed magic links prevents unauthorized access. |
+| **Listings Service** | Go + pgx | Handles listings, conversations, and messages in a single service. Type-safe Postgres driver with connection pooling. Upsert pattern (`ON CONFLICT ... DO UPDATE ... RETURNING id`) for idempotent conversation creation. Transactional message insert + `last_message_at` update. |
+| **Matching Service** | Python + FastAPI | Python is the lingua franca for ML tooling. FastAPI's async support lets the service run a RabbitMQ consumer and serve HTTP traffic in the same process. |
 | **Trust Service** | Python | Isolated worker — no HTTP surface beyond `/healthz`. Three-signal scoring (keyword heuristics 30%, price anomaly 20%, LLM tone 50%) runs fully async after listing creation. |
-| **Vector DB** | Pinecone | Managed ANN index with metadata filtering. Hard constraints (university, rent ceiling, bedrooms) are applied *before* re-ranking by cosine similarity — avoiding the false-positive problem of pure vector search. |
-| **Message Broker** | RabbitMQ | Durable queues decouple listing creation from the two expensive downstream operations (embedding + fraud scoring). If either service is slow or restarting, no listings are lost. |
-| **Database** | PostgreSQL 16 | ACID guarantees for financial data (rent stored in cents). `uuid-ossp` and `pg_trgm` extensions. `updated_at` triggers on all mutable tables. |
-| **Image Storage** | AWS S3 + Pre-signed URLs | The gateway and application servers never handle image bytes — the browser uploads directly to S3. Eliminates a bottleneck and keeps all compute services stateless. |
-| **Transactional Email** | Resend | Fire-and-forget invite email after admin approval. Falls back to console logging when `RESEND_API_KEY` is unset so local development works without email credentials. |
-| **Validation** | Zod | Single schema definition shared between the Server Action (server-side parse) and the form component (client-side parse). One source of truth, two enforcement points. |
+| **Payments** | Stripe Hosted Checkout | Flat fee per confirmed match (tier based on initial listing rent). Agreement add-on optional. Fee is locked to initial rent at conversation creation — immune to price manipulation. Webhook route as backup confirmation path. |
+| **Vector DB** | Pinecone | Managed ANN index with metadata filtering. Hard constraints (university, rent ceiling, bedrooms) applied before re-ranking by cosine similarity — avoiding false positives from pure vector search. |
+| **Message Broker** | RabbitMQ | Durable queues decouple listing creation from the two expensive downstream operations (embedding + fraud scoring). Single-consumer queues are an architectural invariant. |
+| **Database** | PostgreSQL 16 | ACID guarantees for transactional data (rent in cents, confirmed_at). `uuid-ossp` and `pg_trgm` extensions. LATERAL subqueries for unread count and last message preview. `updated_at` triggers on all mutable tables. |
+| **Image Storage** | AWS S3 + Pre-signed URLs | Browser uploads directly to S3 — servers never handle image bytes. Eliminates a bottleneck and keeps all compute services stateless. |
+| **Transactional Email** | Resend | Invite emails after admin approval. Falls back to stdout when `RESEND_API_KEY` is unset for local development. |
+| **Validation** | Zod | Single schema shared between Server Actions (server-side parse) and form components (client-side parse). One source of truth, two enforcement points. |
 
 ---
 
-## Key Engineering Challenges
+## Payment Model
 
-### 1. Listings Stuck in Draft — Trust Service Gap
+Subly charges the lister a one-time match confirmation fee when they decide to proceed with a renter. The fee is based on the listing's rent **at the time the conversation was created** — not when payment is made — making it immune to price manipulation.
 
-**The bug.** After the trust service scored a listing for fraud, it updated `scam_score` in Postgres but never changed `status` from `'draft'` to `'active'`. The listings service's `GET /listings` only returns `status = 'active'` rows, so the browse page and dashboard were always empty — even after listings were created and scored.
-
-**The diagnosis.** The trust service was designed as a pure scoring worker: it consumed the queue, ran the three-signal pipeline, and wrote the score. Transitioning the listing's lifecycle state was never explicitly assigned to it. The result was a silent correctness gap — no error was thrown, the score was written, but the listing was permanently stuck in `draft`.
-
-**The fix.** One-line change in `services/trust/main.py`:
-```python
-# Before
-cur.execute("UPDATE listings SET scam_score = %s WHERE id = %s", (final, listing_id))
-
-# After
-cur.execute("UPDATE listings SET scam_score = %s, status = 'active' WHERE id = %s", (final, listing_id))
-```
-
-**Why the trust service owns the transition.** The listing goes `draft → active` only after it has been scored. The trust service is the only component that knows when scoring is complete. Putting the transition anywhere else (e.g., the listings service on `POST`) would allow unscored listings to appear in search results.
-
----
-
-### 2. RabbitMQ Queue Ownership Fix
-
-**The bug.** During scaffolding, the Matching service and the Trust service both declared consumers on `listing.scam_check`. RabbitMQ distributes messages round-robin across all consumers on the same queue. The result: each message was delivered to exactly *one* consumer — either embedding happened *or* scoring happened, never both.
-
-**The fix.** Explicit queue ownership across two queues:
-
-| Queue | Owner | Payload |
+| Monthly rent | Match fee | Agreement add-on |
 |---|---|---|
-| `listings.new` | Matching service (sole consumer) | Full listing JSON — no DB round-trip needed for embedding |
-| `listing.scam_check` | Trust service (sole consumer) | `{"listing_id": "..."}` |
+| Under $1,000/mo | $29 | +$19 |
+| $1,000–$1,999/mo | $49 | +$19 |
+| $2,000+/mo | $79 | +$19 |
 
-The Listings service publishes to *both* on every `POST /listings`. Single-consumer queues are now an architectural invariant.
+The agreement add-on generates a pre-filled sublease agreement template with digital-signing guidance. It is optional and intended for situations where the leasing office is not handling paperwork directly.
 
-**Why this matters.** Accidental multi-consumer queues are a silent correctness bug: no error is thrown, messages are processed, but each message is only half-handled. The fix required understanding AMQP semantics, not just debugging application code.
-
----
-
-### 3. S3 Pre-signed URL Implementation
-
-**The problem.** The naive upload path — browser → Next.js server → S3 — ties up the server process during transfer, doubles bandwidth costs, and makes compute services stateful.
-
-**The solution.**
-```
-1. Browser calls getPresignedUrl() Server Action
-2. Server generates a PutObject signed URL (5-min TTL, scoped to one S3 key)
-3. Browser PUTs the file directly to S3 — server is not in the path
-4. Browser records the public S3 URL in component state
-5. On form submit, the URL array is sent to Listings Service as plain strings
-```
-
-`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` stay server-side. Each key is namespaced `listings/{uuid}/{sanitized-filename}`. Uploads fire `onChange` so images are already in S3 before the user submits the form; the submit button is disabled while any upload is in flight.
-
----
-
-### 4. Invite-Gated Signup with HMAC Magic Links
-
-**The requirement.** The platform is closed — users can only sign up if an admin has explicitly approved their invite request. A non-.edu email (or anyone without an approved invite) cannot create an account.
-
-**The flow.**
-1. Visitor submits `POST /invite-request` with their email and university name. Status is `pending`.
-2. Admin reviews pending requests at `/admin/invites` and approves or rejects.
-3. On approval, the auth service generates a single-use HMAC-SHA256 token (30-min TTL) and fires a Resend email with the magic link.
-4. Visitor clicks the link → `GET /invite-request/verify?token=X` validates the token and returns a signed payload.
-5. The signup page (`/signup?token=X`) reads the pre-filled email, the user creates a Clerk account, and the token is redeemed (marked `redeemed`).
-
-The token is signed with `INVITE_SECRET` and includes expiry. Replay attacks are prevented by the single-use `redeemed_at` column. If `RESEND_API_KEY` is not set, the magic link is logged to stdout so local development works without email credentials.
+No payment is required from the renter. There are no subscription fees, listing fees, or per-message charges.
 
 ---
 
@@ -179,18 +145,120 @@ The token is signed with `INVITE_SECRET` and includes expiry. Replay attacks are
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `/` | Public | Landing page — invite request form, scroll-aware nav |
+| `/` | Public | Landing page — scroll-aware nav, invite request form |
 | `/signup` | Public | Magic link signup (invite token required) |
 | `/signup/complete` | Public | Post-signup redirect handler |
-| `/onboarding` | Clerk | `.edu` email verification + Vibe Check preferences |
-| `/dashboard` | Clerk + edu | Personalized match feed (semantic + preference-filtered) |
+| `/onboarding` | Clerk + edu | Vibe Check preferences form |
+| `/dashboard` | Clerk + edu | Personalized AI match feed ranked by semantic similarity |
 | `/listings` | Clerk + edu | Browse all active listings with filters |
 | `/listings/new` | Clerk + edu | Create a new sublease listing |
-| `/listings/my` | Clerk + edu | Manage your own listings (pause / reactivate / mark leased) |
-| `/listings/[id]` | Clerk + edu | Full listing detail — images, stats, trust badge |
-| `/listings/[id]/edit` | Clerk + owner | Edit a listing (ownership enforced server-side) |
+| `/listings/my` | Clerk + edu | Manage your listings (pause / reactivate / mark leased) |
+| `/listings/[id]` | Clerk + edu | Listing detail — images, trust badge, "Message lister" CTA |
+| `/listings/[id]/edit` | Clerk + owner | Edit listing (ownership enforced server-side) |
+| `/messages` | Clerk + edu | Inbox — all conversations with unread indicators |
+| `/messages/[id]` | Clerk + edu | Thread — chat, confirm panel (lister), renter info banner |
+| `/messages/[id]/confirmed` | Clerk + edu | Post-payment page — verifies Stripe session, marks match confirmed, renders agreement if purchased |
 | `/admin/invites` | Admin only | Review and approve/reject invite requests |
-| `/privacy`, `/terms`, `/cookies` | Public | Legal pages |
+| `/privacy`, `/terms`, `/cookies` | Public | Legal pages (includes payment terms and Stripe disclosure) |
+
+---
+
+## Key Engineering Decisions
+
+### 1. Idempotent conversation creation
+
+When a renter messages a lister, Subly must create exactly one conversation per `(listing_id, renter_id)` pair regardless of how many times the user clicks. The upsert pattern handles this without a separate `SELECT`:
+
+```sql
+INSERT INTO conversations (listing_id, renter_id, lister_id, initial_rent_cents)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (listing_id, renter_id)
+DO UPDATE SET listing_id = EXCLUDED.listing_id  -- no-op forces RETURNING to fire
+RETURNING id
+```
+
+The fake `DO UPDATE` ensures `RETURNING id` works on both the insert and conflict paths — a single round-trip whether the conversation is new or existing.
+
+### 2. Payment fee locked to initial rent
+
+The match confirmation fee is calculated from `initial_rent_cents` captured at conversation creation, not the listing's current rent. This means a lister who edits their listing price after a conversation starts cannot reduce the fee they'll pay — a common vector for marketplace fee manipulation.
+
+### 3. AppNav server/client split
+
+The nav displays an unread message count badge fetched on every page render. Making `AppNav` an async server component that calls the gateway introduces a server-only import (`auth` from `@clerk/nextjs/server`). Since `NonEduGate` is a client component that renders the nav, importing the async version would break the build.
+
+Solution: split into two exports in separate files:
+- `AppNav` (async server) — fetches unread count, renders `AppNavUI`
+- `AppNavUI` (pure presentational, no server imports) — safe to import from client components
+
+### 4. Listings stuck in draft — trust service gap
+
+After the trust service scored a listing, it updated `scam_score` but never transitioned `status` from `draft` to `active`. The browse page and dashboard only return `status = 'active'` rows, so all listings were permanently invisible.
+
+Fix: the trust service now sets both fields atomically:
+```python
+cur.execute(
+    "UPDATE listings SET scam_score = %s, status = 'active' WHERE id = %s",
+    (final, listing_id)
+)
+```
+
+The trust service owns the `draft → active` transition because it is the only component that knows when scoring is complete.
+
+### 5. RabbitMQ single-consumer invariant
+
+During scaffolding, both the Matching and Trust services declared consumers on `listing.scam_check`. RabbitMQ distributes messages round-robin — each message went to one consumer only, so embedding and scoring never both ran on the same listing.
+
+Fix: strict queue ownership:
+
+| Queue | Owner | Payload |
+|---|---|---|
+| `listings.new` | Matching (sole consumer) | Full listing JSON |
+| `listing.scam_check` | Trust (sole consumer) | `{"listing_id": "..."}` |
+
+### 6. S3 direct upload via pre-signed URLs
+
+```
+1. Browser calls getPresignedUrl() Server Action
+2. Server generates a PutObject signed URL (5-min TTL, scoped to one S3 key)
+3. Browser PUTs the file directly to S3 — server not in the upload path
+4. Browser records the public S3 URL in component state
+5. On submit, the URL array is sent as plain strings to the Listings Service
+```
+
+Credentials stay server-side. Each key is namespaced `listings/{uuid}/{sanitized-filename}`. Images are uploaded before form submission; the submit button is disabled while any upload is in flight.
+
+### 7. Invite-gated signup with HMAC magic links
+
+1. Visitor submits email and university → stored as `pending` invite request
+2. Admin approves at `/admin/invites` → HMAC-SHA256 token generated (30-min TTL)
+3. Resend fires magic link email (logs to stdout if `RESEND_API_KEY` is unset)
+4. Visitor clicks link → token validated → Clerk account created → token redeemed
+5. Single-use `redeemed_at` column prevents replay attacks
+
+---
+
+## Test Coverage
+
+| Layer | Framework | Tests | Coverage |
+|---|---|---|---|
+| Web — schemas | Vitest | 29 | Zod validation for all form schemas |
+| Web — server actions | Vitest + fetch mocks | 27 | Fee calculation, fetch resilience, Stripe checkout session creation and payment verification |
+| Web — ThreadClient | Vitest + Testing Library | 32 | Message rendering, send input, polling, confirm panel (fee tiers, agreement checkbox, Stripe redirect), renter/lister/confirmed banners |
+| Web — AppNavUI | Vitest + Testing Library | 15 | Unread badge boundaries, nav links, back arrow, active highlighting |
+| Web — components | Vitest + Testing Library | 16 | GetStartedFlow, UniversityCombobox |
+| Listings service | Go testing + httptest | 27 | Conversation lifecycle (create, list, get, send, confirm), access control, idempotency, field capture |
+| Gateway | Go testing + httptest | 7 | Auth middleware — missing header, auth errors, unverified users, verified user injection |
+| Matching service | pytest + FastAPI TestClient | — | Health, search, and matches endpoints with mocked Pinecone/OpenAI |
+| Trust service | pytest | — | Keyword scoring, formula, score capping |
+
+Run web tests: `cd web && npm test`
+
+Run Go tests (requires `DATABASE_URL`):
+```bash
+cd services/listings
+DATABASE_URL="postgresql://subly:subly_secret@localhost:5434/subly" go test -v ./...
+```
 
 ---
 
@@ -199,7 +267,7 @@ The token is signed with `INVITE_SECRET` and includes expiry. Replay attacks are
 ### Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running)
-- Four external API keys (see below)
+- API keys for Clerk, OpenAI, Pinecone, and Stripe (see below)
 
 ### 1. Clone and configure
 
@@ -209,41 +277,52 @@ cd Subly
 cp .env.example .env
 ```
 
-Open `.env` and fill in:
+Fill in `.env`:
 
 | Variable | Where to get it |
 |---|---|
-| `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY` | [dashboard.clerk.com](https://dashboard.clerk.com) → Create application → API Keys |
+| `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY` | [dashboard.clerk.com](https://dashboard.clerk.com) → API Keys |
 | `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
 | `PINECONE_API_KEY` | [app.pinecone.io](https://app.pinecone.io) → create index `subly-listings`, dimension `1536`, metric `cosine` |
-| `AWS_*`, `S3_BUCKET_NAME` | AWS Console → S3 bucket + IAM user with `s3:PutObject`. Optional — omit to test without image uploads. |
-| `RESEND_API_KEY` | [resend.com](https://resend.com) → API Keys. Optional — magic links log to stdout when unset. |
+| `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY` | [dashboard.stripe.com](https://dashboard.stripe.com) → Developers → API Keys |
+| `STRIPE_WEBHOOK_SECRET` | `stripe listen --forward-to localhost:3000/api/stripe/webhook` (local) or Stripe dashboard (production) |
+| `AWS_*`, `S3_BUCKET_NAME` | AWS Console → S3 + IAM user with `s3:PutObject`. Optional — omit to test without image uploads. |
+| `RESEND_API_KEY` | [resend.com](https://resend.com). Optional — magic links log to stdout when unset. |
 
-### 2. Start all services
+### 2. Run the DB migration (first time, or after a reset)
+
+```bash
+docker compose up postgres -d
+docker exec subly-postgres psql -U subly -d subly -c "$(cat infra/postgres/migrate_payments.sql)"
+```
+
+### 3. Start all services
 
 ```bash
 docker compose up --build
 ```
 
-First build takes ~3 minutes. All eight containers start together.
+First build takes ~3 minutes. Eight containers start together.
 
 | Service | URL |
 |---|---|
 | Web app | http://localhost:3000 |
 | Gateway | http://localhost:8080/healthz |
-| RabbitMQ management | http://localhost:15672 (user: `subly`, pass: `subly_secret`) |
-| Postgres | `localhost:5434` (user: `subly`, pass: `subly_secret`, db: `subly`) |
+| RabbitMQ management | http://localhost:15672 (`subly` / `subly_secret`) |
+| Postgres | `localhost:5434` (`subly` / `subly_secret` / db: `subly`) |
 
-### 3. Test the full loop
+### 4. Test the full loop
 
-1. Go to `localhost:3000` → submit an invite request with any non-`.edu` email
-2. Open `localhost:3000/admin/invites` (set `ADMIN_USER_IDS` in `.env` to your Clerk user ID)
-3. Approve the invite — a magic link is generated (and emailed if Resend is configured)
-4. Click the magic link → create your Clerk account → verify `.edu` email on the onboarding page
-5. Complete the Vibe Check (sets `user_profiles` preferences)
-6. Post a sublease at `/listings/new`
-7. Watch the RabbitMQ dashboard — messages flow through `listings.new` (embedding) and `listing.scam_check` (fraud scoring) in real-time
-8. Dashboard populates with match cards ranked by semantic similarity; **High Risk** badge appears on listings scoring above 0.7
+1. Go to `localhost:3000` → submit an invite request with a non-`.edu` email
+2. Open `localhost:3000/admin/invites` (set `ADMIN_USER_IDS` to your Clerk user ID)
+3. Approve the invite → magic link generated (emailed if Resend is configured)
+4. Click the link → create Clerk account → verify `.edu` email → complete Vibe Check
+5. Post a sublease at `/listings/new`
+6. Watch RabbitMQ — messages flow through `listings.new` (embedding) and `listing.scam_check` (scoring)
+7. Dashboard shows AI-ranked match cards; **High Risk** badge on listings scoring above 0.7
+8. From the listing detail, click **Message lister** to start a conversation
+9. As the lister, open the thread and click **Confirm this match** → pay via Stripe test card `4242 4242 4242 4242`
+10. Confirmed banner appears on the thread for both parties
 
 ### Useful commands
 
@@ -254,10 +333,10 @@ docker compose logs -f
 # Stream a single service
 docker compose logs -f trust
 
-# Rebuild and restart one service after a code change
+# Rebuild one service after a code change
 docker compose up --build web -d
 
-# Full reset — removes all data
+# Full reset (removes all data)
 docker compose down -v
 ```
 
@@ -270,20 +349,36 @@ subly/
 ├── gateway/                   # Go reverse proxy + Clerk session middleware
 ├── services/
 │   ├── auth/                  # Node.js + Clerk — invite flow, .edu verification, user profiles
-│   │   ├── src/index.js       # Express server (invite CRUD, magic links, Resend)
-│   │   ├── src/helpers.js     # HMAC token signing + university lookup
-│   │   └── __mocks__/         # Jest manual mocks (pg, amqplib, @clerk/express, resend)
-│   ├── listings/              # Go + pgx — CRUD, dual RabbitMQ publisher
+│   ├── listings/              # Go + pgx — listings, conversations, messages, match confirmation
+│   │   ├── main.go            # All HTTP handlers + RabbitMQ publisher
+│   │   ├── handlers_test.go   # Unit + integration tests (listings)
+│   │   └── conversations_test.go  # Integration tests (conversations, messages, confirm)
 │   ├── matching/              # Python + FastAPI — Pinecone embedding + semantic search
 │   └── trust/                 # Python worker — heuristic + LLM fraud scoring + status promotion
 ├── web/                       # Next.js 14 App Router
 │   └── src/
-│       ├── app/               # All routes (landing, onboarding, dashboard, listings/*, admin/*)
-│       │   └── LandingNav.tsx # Scroll-aware nav (white over hero, slate below)
-│       ├── components/        # AppNav, UniversityCombobox, GetStartedFlow, SublyLogo
-│       └── lib/               # actions.ts (Server Actions), schemas.ts (Zod), auth.ts
+│       ├── app/
+│       │   ├── page.tsx           # Landing page
+│       │   ├── LandingNav.tsx     # Scroll-aware nav (white over hero, slate below)
+│       │   ├── dashboard/         # AI match feed
+│       │   ├── listings/          # Browse, detail, new, edit, my
+│       │   ├── messages/          # Inbox + thread (ThreadClient.tsx) + confirmed page
+│       │   ├── onboarding/        # Vibe Check form
+│       │   ├── api/stripe/webhook/  # Stripe webhook handler
+│       │   └── admin/invites/     # Admin invite management
+│       ├── components/
+│       │   ├── AppNav.tsx         # Async server wrapper — fetches unread count
+│       │   ├── AppNavUI.tsx       # Pure presentational nav — safe in client trees
+│       │   └── ...
+│       └── lib/
+│           ├── actions.ts         # Server Actions (messaging, Stripe checkout, S3)
+│           ├── schemas.ts         # Zod validation schemas
+│           └── auth.ts            # requireEduVerified, getSessionUser
 ├── infra/
-│   ├── postgres/init.sql      # Schema: users, listings, user_profiles, invite_requests, conversations
+│   ├── postgres/
+│   │   ├── init.sql               # Full schema (users, listings, conversations, messages, ...)
+│   │   ├── migrate_chat.sql       # Migration: add messaging columns
+│   │   └── migrate_payments.sql   # Migration: add payment confirmation columns
 │   └── rabbitmq/
 ├── docker-compose.yml
 └── .env.example
@@ -294,7 +389,7 @@ subly/
 ## Environment Variables
 
 ```bash
-# Infrastructure (defaults work out of the box)
+# Infrastructure (defaults work locally)
 POSTGRES_USER=subly
 POSTGRES_PASSWORD=subly_secret
 POSTGRES_DB=subly
@@ -312,6 +407,11 @@ OPENAI_API_KEY=sk-...
 PINECONE_API_KEY=...
 PINECONE_INDEX=subly-listings
 
+# Stripe — match confirmation payments (required for payment flow)
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_PUBLISHABLE_KEY=pk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
 # AWS S3 — listing image uploads via pre-signed URLs (optional)
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=...
@@ -326,6 +426,7 @@ FROM_EMAIL=Subly <invites@subly.app>
 ADMIN_SECRET=dev-admin-secret-change-in-prod
 ADMIN_USER_IDS=user_clerk_id_1,user_clerk_id_2
 INVITE_SECRET=dev-invite-secret-change-in-prod
+INTERNAL_SECRET=dev-internal-secret-change-in-prod
 
 # URLs
 APP_URL=http://localhost:3000

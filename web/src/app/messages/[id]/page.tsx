@@ -16,6 +16,7 @@ export default async function ThreadPage({ params }: { params: { id: string } })
   if (!conversation) notFound();
 
   const isLister = user.id === conversation.lister_id;
+  const otherUserId = isLister ? conversation.renter_id : conversation.lister_id;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -33,10 +34,18 @@ export default async function ThreadPage({ params }: { params: { id: string } })
             </svg>
             All messages
           </Link>
-          <div className="bg-white rounded-2xl border border-slate-200 px-5 py-3">
-            <p className="text-xs text-slate-500 mb-0.5">Listing</p>
-            <p className="font-semibold text-slate-900 text-sm">{conversation.listing_title}</p>
-            <p className="text-xs text-slate-500 mt-1">{conversation.other_email}</p>
+          <div className="bg-white rounded-2xl border border-slate-200 px-5 py-3 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs text-slate-500 mb-0.5">Listing</p>
+              <p className="font-semibold text-slate-900 text-sm">{conversation.listing_title}</p>
+              <p className="text-xs text-slate-500 mt-1">{conversation.other_email}</p>
+            </div>
+            <Link
+              href={`/users/${otherUserId}`}
+              className="shrink-0 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition mt-1"
+            >
+              View profile →
+            </Link>
           </div>
         </div>
 

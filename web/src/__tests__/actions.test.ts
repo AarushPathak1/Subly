@@ -29,8 +29,8 @@ vi.mock("@aws-sdk/s3-request-presigner", () => ({ getSignedUrl: vi.fn() }));
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
+import { calculateMatchFee } from "@/lib/fees";
 import {
-  calculateMatchFee,
   fetchConversation,
   fetchMessages,
   sendMessage,

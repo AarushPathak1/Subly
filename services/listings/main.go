@@ -52,6 +52,13 @@ type Conversation struct {
 	IncludesAgreement bool       `json:"includes_agreement"`
 }
 
+type UserProfile struct {
+	ID          string    `json:"id"`
+	University  string    `json:"university"`
+	VibeText    string    `json:"vibe_text"`
+	MemberSince time.Time `json:"member_since"`
+}
+
 type Message struct {
 	ID             string    `json:"id"`
 	ConversationID string    `json:"conversation_id"`
@@ -83,6 +90,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /conversations/{id}/messages", s.handleGetMessages)
 	mux.HandleFunc("POST /conversations/{id}/messages", s.handleSendMessage)
 	mux.HandleFunc("POST /conversations/{id}/confirm", s.handleConfirmConversation)
+	mux.HandleFunc("GET /users/{id}/profile", s.handleGetUserProfile)
 	return mux
 }
 
@@ -103,7 +111,14 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	var query string
 	var args []any
 	if userID != "" {
-		query = selectCols + ` WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`
+		requestingUserID := r.Header.Get("X-User-ID")
+		if requestingUserID != "" && requestingUserID != userID {
+			// Public profile view: only show active listings
+			query = selectCols + ` WHERE user_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 100`
+		} else {
+			// Own listings: show all statuses
+			query = selectCols + ` WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`
+		}
 		args = []any{userID}
 	} else {
 		query = selectCols + ` WHERE status = 'active' ORDER BY created_at DESC LIMIT 50`
@@ -567,6 +582,48 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]string{"status": "confirmed"})
 }
 
+// ─── User profile handler ────────────────────────────────────────────────────
+
+func (s *server) handleGetUserProfile(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var p UserProfile
+	err := s.db.QueryRow(r.Context(), `
+		SELECT u.id,
+		       COALESCE(up.university, u.university, ''),
+		       COALESCE(up.vibe_text, ''),
+		       u.created_at
+		FROM users u
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		WHERE u.id = $1 AND u.edu_verified = true`, id,
+	).Scan(&p.ID, &p.University, &p.VibeText, &p.MemberSince)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("user not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// ─── Expiration worker ───────────────────────────────────────────────────────
+
+func (s *server) startExpirationWorker() {
+	expire := func() {
+		_, err := s.db.Exec(context.Background(), `
+			UPDATE listings SET status = 'expired'
+			WHERE status = 'active'
+			  AND available_to IS NOT NULL
+			  AND available_to < CURRENT_DATE`)
+		if err != nil {
+			log.Printf("[listings] expiration worker: %v", err)
+		}
+	}
+	expire()
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		expire()
+	}
+}
+
 // ─── MQ helpers ──────────────────────────────────────────────────────────────
 
 func (s *server) publishScamCheck(listingID string) {
@@ -635,6 +692,8 @@ func main() {
 	}
 
 	s := &server{db: db, mq: mqCh, mqQueue: "listing.scam_check", mqNewQueue: "listings.new"}
+
+	go s.startExpirationWorker()
 
 	port := envOr("PORT", "3002")
 	srv := &http.Server{

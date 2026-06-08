@@ -25,13 +25,15 @@ const STATUS_STYLES: Record<string, string> = {
   draft:   "bg-slate-100 text-slate-600 border-slate-200",
   paused:  "bg-amber-100 text-amber-700 border-amber-200",
   leased:  "bg-indigo-100 text-indigo-700 border-indigo-200",
+  expired: "bg-red-50 text-red-500 border-red-100",
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  active: "Active",
-  draft:  "Processing…",
-  paused: "Paused",
-  leased: "Leased",
+  active:  "Active",
+  draft:   "Processing…",
+  paused:  "Paused",
+  leased:  "Leased",
+  expired: "Expired",
 };
 
 function MyListingCard({ listing }: { listing: Listing }) {
@@ -81,53 +83,56 @@ function MyListingCard({ listing }: { listing: Listing }) {
         <p className="text-xs text-slate-400 mb-4">{listing.bedrooms}bd · {listing.bathrooms}ba · {listing.university_near || listing.address}</p>
 
         {/* Actions */}
-        <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-100">
-          {(status === "active" || status === "paused") && (
-            <Link
-              href={`/listings/${listing.id}/edit`}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition"
-            >
-              Edit
-            </Link>
-          )}
-          {status === "active" && (
-            <button
-              onClick={() => changeStatus("paused")}
-              disabled={isPending}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition disabled:opacity-50"
-            >
-              Pause
-            </button>
-          )}
-          {status === "paused" && (
-            <button
-              onClick={() => changeStatus("active")}
-              disabled={isPending}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition disabled:opacity-50"
-            >
-              Reactivate
-            </button>
-          )}
-          {(status === "active" || status === "paused") && (
-            <button
-              onClick={() => changeStatus("leased")}
-              disabled={isPending}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-50 text-slate-600 hover:bg-slate-100 transition disabled:opacity-50"
-            >
-              Mark leased
-            </button>
-          )}
-        </div>
+        {status !== "expired" && status !== "leased" && (
+          <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-100">
+            {(status === "active" || status === "paused") && (
+              <Link
+                href={`/listings/${listing.id}/edit`}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition"
+              >
+                Edit
+              </Link>
+            )}
+            {status === "active" && (
+              <button
+                onClick={() => changeStatus("paused")}
+                disabled={isPending}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition disabled:opacity-50"
+              >
+                Pause
+              </button>
+            )}
+            {status === "paused" && (
+              <button
+                onClick={() => changeStatus("active")}
+                disabled={isPending}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition disabled:opacity-50"
+              >
+                Reactivate
+              </button>
+            )}
+            {(status === "active" || status === "paused") && (
+              <button
+                onClick={() => changeStatus("leased")}
+                disabled={isPending}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-50 text-slate-600 hover:bg-slate-100 transition disabled:opacity-50"
+              >
+                Mark leased
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 export function MyListingsClient({ listings }: { listings: Listing[] }) {
-  const active  = listings.filter((l) => l.status === "active");
-  const drafts  = listings.filter((l) => l.status === "draft");
-  const paused  = listings.filter((l) => l.status === "paused");
-  const leased  = listings.filter((l) => l.status === "leased");
+  const active   = listings.filter((l) => l.status === "active");
+  const drafts   = listings.filter((l) => l.status === "draft");
+  const paused   = listings.filter((l) => l.status === "paused");
+  const leased   = listings.filter((l) => l.status === "leased");
+  const expired  = listings.filter((l) => l.status === "expired");
 
   if (listings.length === 0) {
     return (
@@ -155,6 +160,7 @@ export function MyListingsClient({ listings }: { listings: Listing[] }) {
     { label: "Processing", items: drafts },
     { label: "Paused", items: paused },
     { label: "Leased", items: leased },
+    { label: "Expired", items: expired },
   ].filter((s) => s.items.length > 0);
 
   return (

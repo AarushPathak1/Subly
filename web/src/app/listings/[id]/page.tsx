@@ -204,14 +204,22 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
             {/* CTA */}
             <div className="flex flex-wrap gap-3 pt-6 border-t border-slate-100">
               {user.id !== listing.user_id && (
-                <form action={startConversation.bind(null, listing.id)}>
-                  <button
-                    type="submit"
-                    className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition"
+                <>
+                  <form action={startConversation.bind(null, listing.id)}>
+                    <button
+                      type="submit"
+                      className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition"
+                    >
+                      Message lister
+                    </button>
+                  </form>
+                  <Link
+                    href={`/users/${listing.user_id}`}
+                    className="px-5 py-2.5 bg-indigo-50 text-indigo-700 text-sm font-semibold rounded-xl hover:bg-indigo-100 transition"
                   >
-                    Message lister
-                  </button>
-                </form>
+                    View lister profile
+                  </Link>
+                </>
               )}
               <Link
                 href="/dashboard"

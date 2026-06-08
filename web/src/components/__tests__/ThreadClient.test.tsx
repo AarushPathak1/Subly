@@ -15,6 +15,9 @@ vi.mock("@/lib/actions", () => ({
   fetchMessages: (...args: unknown[]) => mockFetchMessages(...args),
   sendMessage: (...args: unknown[]) => mockSendMessage(...args),
   createCheckoutSession: (...args: unknown[]) => mockCreateCheckoutSession(...args),
+}));
+
+vi.mock("@/lib/fees", () => ({
   calculateMatchFee: (cents: number) => mockCalculateMatchFee(cents),
 }));
 

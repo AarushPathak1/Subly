@@ -225,11 +225,7 @@ export interface ConversationDetail {
   includes_agreement: boolean;
 }
 
-export function calculateMatchFee(initialRentCents: number): number {
-  if (initialRentCents < 100000) return 2900;
-  if (initialRentCents < 200000) return 4900;
-  return 7900;
-}
+import { calculateMatchFee } from "@/lib/fees";
 
 export async function createCheckoutSession(
   conversationId: string,
@@ -385,6 +381,30 @@ export async function sendMessage(
     return {};
   } catch {
     return { error: "Failed to send message" };
+  }
+}
+
+// ─── User profiles ────────────────────────────────────────────────────────────
+
+export interface UserProfile {
+  id: string;
+  university: string;
+  vibe_text: string;
+  member_since: string;
+}
+
+export async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
+  const token = await getBearerToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${GATEWAY}/api/listings/users/${userId}/profile`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
   }
 }
 

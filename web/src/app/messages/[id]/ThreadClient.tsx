@@ -5,9 +5,9 @@ import {
   fetchMessages,
   sendMessage,
   createCheckoutSession,
-  calculateMatchFee,
   type ChatMessage,
 } from "@/lib/actions";
+import { calculateMatchFee } from "@/lib/fees";
 
 interface ThreadClientProps {
   conversationId: string;
