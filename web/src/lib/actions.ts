@@ -342,25 +342,31 @@ export async function startConversation(listingId: string): Promise<void> {
 export async function fetchConversation(conversationId: string): Promise<ConversationDetail | null> {
   const token = await getBearerToken();
   if (!token) return null;
-
-  const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (!res.ok) return null;
-  return res.json();
+  try {
+    const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchMessages(conversationId: string): Promise<ChatMessage[]> {
   const token = await getBearerToken();
   if (!token) return [];
-
-  const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/messages`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
-  return res.json();
+  try {
+    const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/messages`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
 }
 
 export async function sendMessage(
@@ -369,15 +375,17 @@ export async function sendMessage(
 ): Promise<{ error?: string }> {
   const token = await getBearerToken();
   if (!token) return { error: "Not signed in" };
-
-  const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ body }),
-  });
-
-  if (!res.ok) return { error: "Failed to send message" };
-  return {};
+  try {
+    const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ body }),
+    });
+    if (!res.ok) return { error: "Failed to send message" };
+    return {};
+  } catch {
+    return { error: "Failed to send message" };
+  }
 }
 
 // ─── S3 pre-signed upload URL ─────────────────────────────────────────────────
