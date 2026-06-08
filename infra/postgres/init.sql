@@ -58,14 +58,18 @@ CREATE INDEX IF NOT EXISTS user_profiles_user_id_idx ON user_profiles(user_id);
 
 -- ─── Conversations ──────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS conversations (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    listing_id      UUID REFERENCES listings(id) ON DELETE CASCADE,
-    renter_id       UUID REFERENCES users(id) ON DELETE CASCADE,
-    lister_id       UUID REFERENCES users(id) ON DELETE CASCADE,
-    renter_read_at  TIMESTAMPTZ,
-    lister_read_at  TIMESTAMPTZ,
-    last_message_at TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    listing_id          UUID REFERENCES listings(id) ON DELETE CASCADE,
+    renter_id           UUID REFERENCES users(id) ON DELETE CASCADE,
+    lister_id           UUID REFERENCES users(id) ON DELETE CASCADE,
+    renter_read_at      TIMESTAMPTZ,
+    lister_read_at      TIMESTAMPTZ,
+    last_message_at     TIMESTAMPTZ,
+    initial_rent_cents  INT NOT NULL DEFAULT 0,
+    confirmed_at        TIMESTAMPTZ,
+    stripe_session_id   TEXT,
+    includes_agreement  BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT conversations_listing_renter_unique UNIQUE (listing_id, renter_id)
 );
 

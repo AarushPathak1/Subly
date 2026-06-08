@@ -62,7 +62,7 @@ export default function PrivacyPage() {
           {/* Main content */}
           <main>
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Privacy Policy</h1>
-            <p className="text-sm text-slate-500 mb-10">Last updated: May 2025</p>
+            <p className="text-sm text-slate-500 mb-10">Last updated: June 2026</p>
 
             <div className="space-y-10 text-slate-700 leading-relaxed">
               <section id="who-we-are">
@@ -138,6 +138,15 @@ export default function PrivacyPage() {
                   <li>
                     <strong>AWS S3</strong> — stores listing photos you upload. Photos are accessible
                     to all logged-in Subly users.
+                  </li>
+                  <li>
+                    <strong>Stripe</strong> — processes match confirmation payments. When you pay,
+                    Stripe receives your card details directly; Subly never sees or stores your full
+                    card number. Stripe may collect billing address and device data per their own{" "}
+                    <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
+                      Privacy Policy
+                    </a>
+                    . We store only the Stripe session ID and payment status in our database.
                   </li>
                 </ul>
               </section>

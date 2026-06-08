@@ -199,6 +199,10 @@ services:
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       ADMIN_SECRET: ${ADMIN_SECRET:-dev-admin-secret-change-in-prod}
       APP_URL: ${APP_URL:-http://localhost:3000}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret-change-in-prod}
     depends_on:
       - gateway
     networks:

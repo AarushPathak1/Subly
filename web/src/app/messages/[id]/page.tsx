@@ -15,6 +15,8 @@ export default async function ThreadPage({ params }: { params: { id: string } })
 
   if (!conversation) notFound();
 
+  const isLister = user.id === conversation.lister_id;
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <AppNav active="messages" />
@@ -43,6 +45,10 @@ export default async function ThreadPage({ params }: { params: { id: string } })
           <ThreadClient
             conversationId={params.id}
             currentUserId={user.id}
+            isLister={isLister}
+            confirmedAt={conversation.confirmed_at ?? null}
+            initialRentCents={conversation.initial_rent_cents}
+            includesAgreement={conversation.includes_agreement}
             initialMessages={messages}
           />
         </div>

@@ -37,16 +37,19 @@ type Listing struct {
 }
 
 type Conversation struct {
-	ID            string     `json:"id"`
-	ListingID     string     `json:"listing_id"`
-	ListingTitle  string     `json:"listing_title"`
-	RenterID      string     `json:"renter_id"`
-	ListerID      string     `json:"lister_id"`
-	OtherEmail    string     `json:"other_email"`
-	LastMessageAt *time.Time `json:"last_message_at,omitempty"`
-	LastMessage   string     `json:"last_message"`
-	UnreadCount   int        `json:"unread_count"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID                string     `json:"id"`
+	ListingID         string     `json:"listing_id"`
+	ListingTitle      string     `json:"listing_title"`
+	RenterID          string     `json:"renter_id"`
+	ListerID          string     `json:"lister_id"`
+	OtherEmail        string     `json:"other_email"`
+	LastMessageAt     *time.Time `json:"last_message_at,omitempty"`
+	LastMessage       string     `json:"last_message"`
+	UnreadCount       int        `json:"unread_count"`
+	CreatedAt         time.Time  `json:"created_at"`
+	InitialRentCents  int        `json:"initial_rent_cents"`
+	ConfirmedAt       *time.Time `json:"confirmed_at,omitempty"`
+	IncludesAgreement bool       `json:"includes_agreement"`
 }
 
 type Message struct {
@@ -79,6 +82,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /conversations/{id}", s.handleGetConversation)
 	mux.HandleFunc("GET /conversations/{id}/messages", s.handleGetMessages)
 	mux.HandleFunc("POST /conversations/{id}/messages", s.handleSendMessage)
+	mux.HandleFunc("POST /conversations/{id}/confirm", s.handleConfirmConversation)
 	return mux
 }
 
@@ -298,7 +302,8 @@ func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 
 	var listerID string
-	err := s.db.QueryRow(ctx, `SELECT user_id FROM listings WHERE id = $1`, body.ListingID).Scan(&listerID)
+	var rentCents int
+	err := s.db.QueryRow(ctx, `SELECT user_id, rent_cents FROM listings WHERE id = $1`, body.ListingID).Scan(&listerID, &rentCents)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("listing not found"))
 		return
@@ -311,11 +316,11 @@ func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	// Insert or get existing — upsert trick: DO UPDATE with a no-op to get RETURNING on conflict
 	var convID string
 	err = s.db.QueryRow(ctx, `
-		INSERT INTO conversations (listing_id, renter_id, lister_id)
-		VALUES ($1, $2, $3)
+		INSERT INTO conversations (listing_id, renter_id, lister_id, initial_rent_cents)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (listing_id, renter_id) DO UPDATE SET listing_id = EXCLUDED.listing_id
 		RETURNING id`,
-		body.ListingID, userID, listerID,
+		body.ListingID, userID, listerID, rentCents,
 	).Scan(&convID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -388,11 +393,13 @@ func (s *server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	var c Conversation
 	var lastMsgAt *time.Time
+	var confirmedAt *time.Time
 	err := s.db.QueryRow(r.Context(), `
 		SELECT c.id, c.listing_id, l.title,
 		       c.renter_id, c.lister_id,
 		       CASE WHEN c.renter_id = $2 THEN ul.email ELSE ur.email END,
-		       c.last_message_at, c.created_at, '', 0
+		       c.last_message_at, c.created_at, '', 0,
+		       c.initial_rent_cents, c.confirmed_at, c.includes_agreement
 		FROM conversations c
 		JOIN listings l  ON l.id  = c.listing_id
 		JOIN users ur    ON ur.id = c.renter_id
@@ -401,12 +408,14 @@ func (s *server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		id, userID,
 	).Scan(&c.ID, &c.ListingID, &c.ListingTitle,
 		&c.RenterID, &c.ListerID, &c.OtherEmail,
-		&lastMsgAt, &c.CreatedAt, &c.LastMessage, &c.UnreadCount)
+		&lastMsgAt, &c.CreatedAt, &c.LastMessage, &c.UnreadCount,
+		&c.InitialRentCents, &confirmedAt, &c.IncludesAgreement)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}
 	c.LastMessageAt = lastMsgAt
+	c.ConfirmedAt = confirmedAt
 	writeJSON(w, http.StatusOK, c)
 }
 
@@ -514,6 +523,48 @@ func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, msg)
+}
+
+func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	var body struct {
+		StripeSessionID   string `json:"stripe_session_id"`
+		IncludesAgreement bool   `json:"includes_agreement"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid body"))
+		return
+	}
+	ctx := r.Context()
+
+	var listerID string
+	if err := s.db.QueryRow(ctx, `SELECT lister_id FROM conversations WHERE id = $1`, id).Scan(&listerID); err != nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		return
+	}
+	if listerID != userID {
+		writeErr(w, http.StatusForbidden, fmt.Errorf("only the lister can confirm a match"))
+		return
+	}
+
+	// Idempotent: preserve existing confirmed_at if already set
+	if _, err := s.db.Exec(ctx, `
+		UPDATE conversations
+		SET confirmed_at      = COALESCE(confirmed_at, NOW()),
+		    stripe_session_id = $2,
+		    includes_agreement = $3
+		WHERE id = $1`,
+		id, body.StripeSessionID, body.IncludesAgreement,
+	); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "confirmed"})
 }
 
 // ─── MQ helpers ──────────────────────────────────────────────────────────────

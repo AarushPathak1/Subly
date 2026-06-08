@@ -5,6 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import Stripe from "stripe";
 import {
   VerifyEmailSchema,
   VibeProfileSchema,
@@ -219,6 +220,100 @@ export interface ConversationDetail {
   other_email: string;
   last_message_at?: string;
   created_at: string;
+  initial_rent_cents: number;
+  confirmed_at?: string;
+  includes_agreement: boolean;
+}
+
+export function calculateMatchFee(initialRentCents: number): number {
+  if (initialRentCents < 100000) return 2900;
+  if (initialRentCents < 200000) return 4900;
+  return 7900;
+}
+
+export async function createCheckoutSession(
+  conversationId: string,
+  includesAgreement: boolean
+): Promise<{ url: string } | { error: string }> {
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+
+  const conv = await fetchConversation(conversationId);
+  if (!conv) return { error: "Conversation not found" };
+
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+  const baseFee = calculateMatchFee(conv.initial_rent_cents);
+
+  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+    {
+      price_data: {
+        currency: "usd",
+        product_data: {
+          name: "Subly Match Confirmation",
+          description: `Sublease match for "${conv.listing_title}"`,
+        },
+        unit_amount: baseFee,
+      },
+      quantity: 1,
+    },
+  ];
+
+  if (includesAgreement) {
+    lineItems.push({
+      price_data: {
+        currency: "usd",
+        product_data: {
+          name: "Sublease Agreement",
+          description: "Auto-generated sublease agreement with digital signing",
+        },
+        unit_amount: 1900,
+      },
+      quantity: 1,
+    });
+  }
+
+  const appUrl = process.env.APP_URL ?? "http://localhost:3000";
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    line_items: lineItems,
+    success_url: `${appUrl}/messages/${conversationId}/confirmed?session_id={CHECKOUT_SESSION_ID}&agreement=${includesAgreement}`,
+    cancel_url: `${appUrl}/messages/${conversationId}`,
+    metadata: {
+      conversation_id: conversationId,
+      includes_agreement: String(includesAgreement),
+    },
+  });
+
+  return { url: session.url! };
+}
+
+export async function verifyAndConfirmMatch(
+  conversationId: string,
+  sessionId: string,
+  includesAgreement: boolean
+): Promise<{ error?: string }> {
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.payment_status !== "paid") return { error: "Payment not completed" };
+  } catch {
+    return { error: "Could not verify payment" };
+  }
+
+  const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/confirm`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ stripe_session_id: sessionId, includes_agreement: includesAgreement }),
+  });
+
+  if (!res.ok) return { error: "Failed to confirm match" };
+  return {};
 }
 
 export interface ChatMessage {

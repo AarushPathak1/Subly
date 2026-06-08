@@ -8,6 +8,7 @@ const sections = [
   { id: "eligibility", label: "Eligibility" },
   { id: "what-subly-is", label: "What Subly is" },
   { id: "listings", label: "Listings" },
+  { id: "payments", label: "Payments & fees" },
   { id: "prohibited", label: "Prohibited conduct" },
   { id: "ai-features", label: "AI-powered features" },
   { id: "ip", label: "Intellectual property" },
@@ -66,7 +67,7 @@ export default function TermsPage() {
           {/* Main content */}
           <main>
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Terms of Service</h1>
-            <p className="text-sm text-slate-500 mb-10">Last updated: May 2025</p>
+            <p className="text-sm text-slate-500 mb-10">Last updated: June 2026</p>
 
             <div className="space-y-10 text-slate-700 leading-relaxed">
               <section id="acceptance">
@@ -113,8 +114,33 @@ export default function TermsPage() {
                 </ul>
               </section>
 
+              <section id="payments">
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">5. Payments and fees</h2>
+                <p className="mb-3">
+                  Subly charges a one-time match confirmation fee when a lister chooses to confirm a sublease match. This fee is based on the listing&apos;s advertised monthly rent at the time the conversation was created:
+                </p>
+                <ul className="list-disc pl-5 space-y-2 mb-3">
+                  <li>Listings under $1,000/mo — <strong>$29</strong></li>
+                  <li>Listings $1,000–$1,999/mo — <strong>$49</strong></li>
+                  <li>Listings $2,000/mo and above — <strong>$79</strong></li>
+                </ul>
+                <p className="mb-3">
+                  An optional sublease agreement add-on is available for an additional <strong>$19</strong>. This generates a pre-filled agreement template; it is not a substitute for legal counsel and does not constitute a legally binding document on its own.
+                </p>
+                <p className="mb-3">
+                  The fee is charged only to the lister and is non-refundable once payment is processed, except where required by applicable law. The fee is locked to the initial listing price at the time the conversation began and is not affected by any subsequent price changes.
+                </p>
+                <p className="mb-3">
+                  Payments are processed securely by Stripe. Subly does not store your full card details. By proceeding with payment, you agree to Stripe&apos;s{" "}
+                  <a href="https://stripe.com/legal/ssa" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">Terms of Service</a>.
+                </p>
+                <p>
+                  <strong>Honest disclosure:</strong> The match confirmation fee compensates Subly for operating the platform, maintaining the AI matching engine, and verifying university affiliation. It does not guarantee that the sublease will proceed, that the property is as described, or that either party will fulfill their commitments.
+                </p>
+              </section>
+
               <section id="prohibited">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">5. Prohibited conduct</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">6. Prohibited conduct</h2>
                 <p className="mb-3">You agree not to:</p>
                 <ul className="list-disc pl-5 space-y-2">
                   <li>Post listings for properties you do not have the right to sublease.</li>
@@ -127,7 +153,7 @@ export default function TermsPage() {
               </section>
 
               <section id="ai-features">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">6. AI-powered features</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">7. AI-powered features</h2>
                 <p>
                   Subly uses AI to generate match scores between renters and listings. These scores
                   are suggestions only and should not be treated as guarantees of compatibility,
@@ -137,7 +163,7 @@ export default function TermsPage() {
               </section>
 
               <section id="ip">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">7. Intellectual property</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">8. Intellectual property</h2>
                 <p>
                   By posting content (photos, descriptions) on Subly, you grant us a non-exclusive,
                   royalty-free license to display that content on the platform. You retain ownership
@@ -147,7 +173,7 @@ export default function TermsPage() {
               </section>
 
               <section id="disclaimers">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">8. Disclaimers</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">9. Disclaimers</h2>
                 <p>
                   Subly is provided "as is" without warranties of any kind. We do not verify the
                   accuracy of listings beyond automated fraud detection. We are not responsible for
@@ -157,7 +183,7 @@ export default function TermsPage() {
               </section>
 
               <section id="liability">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">9. Limitation of liability</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">10. Limitation of liability</h2>
                 <p>
                   To the maximum extent permitted by law, Subly's total liability to you for any
                   claim arising from your use of the platform is limited to the amount you paid us
@@ -166,7 +192,7 @@ export default function TermsPage() {
               </section>
 
               <section id="termination">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">10. Termination</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">11. Termination</h2>
                 <p>
                   We may suspend or terminate your account at any time for violation of these Terms.
                   You may delete your account at any time from your account settings.
@@ -174,7 +200,7 @@ export default function TermsPage() {
               </section>
 
               <section id="changes">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">11. Changes to these Terms</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">12. Changes to these Terms</h2>
                 <p>
                   We may update these Terms as the product evolves. Continued use of Subly after
                   changes take effect constitutes acceptance of the updated Terms.
@@ -182,7 +208,7 @@ export default function TermsPage() {
               </section>
 
               <section id="contact">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">12. Contact</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">13. Contact</h2>
                 <p>
                   Questions? Email us at{" "}
                   <a href="mailto:legal@subly.app" className="text-indigo-600 hover:underline">

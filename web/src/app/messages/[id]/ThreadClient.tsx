@@ -1,26 +1,51 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { fetchMessages, sendMessage, type ChatMessage } from "@/lib/actions";
+import {
+  fetchMessages,
+  sendMessage,
+  createCheckoutSession,
+  calculateMatchFee,
+  type ChatMessage,
+} from "@/lib/actions";
 
 interface ThreadClientProps {
   conversationId: string;
   currentUserId: string;
+  isLister: boolean;
+  confirmedAt: string | null;
+  initialRentCents: number;
+  includesAgreement: boolean;
   initialMessages: ChatMessage[];
 }
 
-export function ThreadClient({ conversationId, currentUserId, initialMessages }: ThreadClientProps) {
+export function ThreadClient({
+  conversationId,
+  currentUserId,
+  isLister,
+  confirmedAt: initialConfirmedAt,
+  initialRentCents,
+  includesAgreement: initialIncludesAgreement,
+  initialMessages,
+}: ThreadClientProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [confirmedAt, setConfirmedAt] = useState(initialConfirmedAt);
+  const [showConfirmPanel, setShowConfirmPanel] = useState(false);
+  const [wantsAgreement, setWantsAgreement] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to bottom whenever messages update
+  const isConfirmed = !!confirmedAt;
+  const baseFee = calculateMatchFee(initialRentCents);
+  const totalFee = baseFee + (wantsAgreement ? 1900 : 0);
+  const rentDisplay = `$${Math.round(initialRentCents / 100).toLocaleString()}/mo`;
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Poll every 5s, skip when tab is hidden
   useEffect(() => {
     const poll = async () => {
       if (document.visibilityState !== "visible") return;
@@ -51,8 +76,111 @@ export function ThreadClient({ conversationId, currentUserId, initialMessages }:
     }
   };
 
+  const handleProceedToPayment = async () => {
+    setCheckoutLoading(true);
+    const result = await createCheckoutSession(conversationId, wantsAgreement);
+    if ("error" in result) {
+      setCheckoutLoading(false);
+      return;
+    }
+    window.location.href = result.url;
+  };
+
   return (
     <div className="flex flex-col h-[calc(100vh-120px)]">
+
+      {/* Status banner */}
+      {isConfirmed ? (
+        <div className="flex items-center gap-3 px-5 py-3 bg-emerald-50 border-b border-emerald-100">
+          <span className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <path d="M2 5l2.5 2.5L8 2.5" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </span>
+          <p className="text-sm text-emerald-800 font-medium">
+            Match confirmed{initialIncludesAgreement ? " · Sublease agreement included" : ""} — you&apos;re both moving forward.
+          </p>
+        </div>
+      ) : isLister ? (
+        <div className="border-b border-slate-100">
+          {!showConfirmPanel ? (
+            <div className="flex items-center justify-between gap-4 px-5 py-3 bg-indigo-50">
+              <div>
+                <p className="text-sm font-medium text-indigo-900">Found your person?</p>
+                <p className="text-xs text-indigo-600 mt-0.5">
+                  Confirm this match to lock it in — fee based on listed rent of {rentDisplay}.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowConfirmPanel(true)}
+                className="shrink-0 px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition"
+              >
+                Confirm match
+              </button>
+            </div>
+          ) : (
+            <div className="px-5 py-4 bg-indigo-50 space-y-4">
+              <div className="flex items-start justify-between">
+                <p className="text-sm font-semibold text-indigo-900">Confirm this match</p>
+                <button onClick={() => setShowConfirmPanel(false)} className="text-slate-400 hover:text-slate-600 text-lg leading-none">×</button>
+              </div>
+
+              {/* Fee breakdown */}
+              <div className="bg-white rounded-xl border border-indigo-100 divide-y divide-slate-100 text-sm">
+                <div className="flex justify-between px-4 py-3">
+                  <span className="text-slate-700">Match confirmation fee</span>
+                  <span className="font-semibold text-slate-900">${(baseFee / 100).toFixed(2)}</span>
+                </div>
+                <div className="flex items-start gap-3 px-4 py-3">
+                  <input
+                    id="agreement"
+                    type="checkbox"
+                    checked={wantsAgreement}
+                    onChange={(e) => setWantsAgreement(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <label htmlFor="agreement" className="flex-1 cursor-pointer">
+                    <span className="font-medium text-slate-800">+ Sublease agreement</span>
+                    <span className="text-slate-500"> — $19.00</span>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Pre-filled agreement with digital signing for both parties. Only needed if your leasing office isn&apos;t handling paperwork.
+                    </p>
+                  </label>
+                </div>
+                {wantsAgreement && (
+                  <div className="flex justify-between px-4 py-3 bg-indigo-50/50">
+                    <span className="font-semibold text-slate-800">Total</span>
+                    <span className="font-bold text-indigo-700">${(totalFee / 100).toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+
+              <p className="text-xs text-slate-500">
+                You&apos;re only charged when both of you are ready. No action required from the renter — this is a one-time fee for the match.
+              </p>
+
+              <button
+                onClick={handleProceedToPayment}
+                disabled={checkoutLoading}
+                className="w-full py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition"
+              >
+                {checkoutLoading ? "Redirecting to payment…" : `Pay $${(totalFee / 100).toFixed(2)} and confirm`}
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-start gap-3 px-5 py-3 bg-slate-50 border-b border-slate-100">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="mt-0.5 shrink-0 text-slate-400">
+            <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.4"/>
+            <path d="M8 7v4M8 5.5v.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+          </svg>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            If you and {isLister ? "the renter" : "the lister"} decide to move forward, the lister will confirm the match through Subly. No payment or action is needed from you — you&apos;ll see a confirmation here when it&apos;s done.
+          </p>
+        </div>
+      )}
+
       {/* Message list */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
         {messages.length === 0 && (
