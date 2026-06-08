@@ -10,6 +10,17 @@ function resetStore() {
 
 function getStore() { return _store; }
 
+function addUser(user) {
+  _store.users.push({
+    id: user.id || `user-${Date.now()}`,
+    clerk_id: user.clerk_id || `clerk-${user.id}`,
+    email: user.email,
+    edu_verified: user.edu_verified ?? true,
+    university: user.university || null,
+    created_at: new Date(),
+  });
+}
+
 // Minimal mock query engine
 async function query(sql, params = []) {
   const s = sql.replace(/\s+/g, " ").trim().toLowerCase();
@@ -88,6 +99,12 @@ async function query(sql, params = []) {
     return { rows };
   }
 
+  // users SELECT by internal id (used by getUserEmail)
+  if (s.includes("from users where id")) {
+    const rows = _store.users.filter((u) => u.id === params[0]);
+    return { rows };
+  }
+
   return { rows: [] };
 }
 
@@ -95,4 +112,4 @@ class Pool {
   query(...args) { return query(...args); }
 }
 
-module.exports = { Pool, resetStore, getStore };
+module.exports = { Pool, resetStore, getStore, addUser };

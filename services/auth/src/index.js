@@ -598,4 +598,10 @@ if (require.main === module) {
   app.listen(PORT, () => console.log(`[auth] listening on :${PORT}`));
 }
 
-module.exports = { app, db, connectMQ, getChannel: () => channel };
+module.exports = {
+  app, db, connectMQ, getChannel: () => channel,
+  sendNewMessageEmail,
+  sendMatchConfirmedEmail,
+  sendListingExpiredEmail,
+  consumeNotifications,
+};
