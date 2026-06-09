@@ -156,15 +156,34 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// corsMiddleware adds permissive CORS headers for local development.
-// Replace with a proper allow-list before production.
+// corsMiddleware enforces an origin allowlist driven by ALLOWED_ORIGINS (comma-separated).
+// Falls back to permissive "*" only when the env var is unset (local dev).
 func corsMiddleware(next http.Handler) http.Handler {
+	raw := os.Getenv("ALLOWED_ORIGINS")
+	var allowed map[string]bool
+	if raw != "" {
+		allowed = make(map[string]bool)
+		for _, o := range strings.Split(raw, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				allowed[o] = true
+			}
+		}
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin == "" {
-			origin = "*"
+		var allowOrigin string
+		if allowed == nil {
+			// dev: allow all
+			allowOrigin = "*"
+		} else if origin != "" && allowed[origin] {
+			allowOrigin = origin
 		}
-		w.Header().Set("Access-Control-Allow-Origin", origin)
+
+		if allowOrigin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", strings.Join([]string{
 			"Content-Type", "Authorization", "X-Request-ID",

@@ -41,7 +41,6 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-subly_secret}
     ports:
       - "5672:5672"    # AMQP
-      - "15672:15672"  # Management UI
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
       - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
@@ -70,6 +69,7 @@ services:
       MATCHING_SERVICE_URL: "http://matching:3003"
       ENV: ${ENV:-development}
       INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret-change-in-prod}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
     depends_on:
       - auth
       - listings

@@ -1,6 +1,6 @@
 # Subly — Student Subleasing Marketplace
 
-A trust-first sublease platform built exclusively for verified university students. Every listing is invite-gated, `.edu`-verified, AI-matched for semantic compatibility, and scored for fraud before it reaches a renter. When both parties are ready to move forward, listers confirm the match through Subly — paying a flat fee based on the listed rent, with an optional sublease agreement add-on.
+A trust-first sublease platform built exclusively for verified university students. Every listing is invite-gated, `.edu`-verified, AI-matched for semantic compatibility, and scored for fraud before it reaches a renter. When both parties are ready to move forward, listers confirm the match through Subly — paying a flat fee based on the listed rent.
 
 ---
 
@@ -86,11 +86,10 @@ Renter clicks "Message lister" on listing detail
 
 Both parties chat in-app
   → Lister clicks "Confirm this match" → fee panel shown (tier based on initial rent)
-  → Optional: +$19 sublease agreement add-on
   → Browser → Stripe Checkout (hosted)
   → Stripe redirects to /messages/{id}/confirmed?session_id=...
   → Server action verifies Stripe session → Listings Service marks confirmed_at
-  → Thread shows confirmed banner; agreement template rendered if purchased
+  → Thread shows confirmed banner
 ```
 
 ### Invite flow — joining the platform
@@ -115,7 +114,7 @@ Visitor clicks magic link → /signup?token=X → verifies token
 | **Listings Service** | Go + pgx | Handles listings, conversations, and messages in a single service. Type-safe Postgres driver with connection pooling. Upsert pattern (`ON CONFLICT ... DO UPDATE ... RETURNING id`) for idempotent conversation creation. Transactional message insert + `last_message_at` update. |
 | **Matching Service** | Python + FastAPI | Python is the lingua franca for ML tooling. FastAPI's async support lets the service run a RabbitMQ consumer and serve HTTP traffic in the same process. |
 | **Trust Service** | Python | Isolated worker — no HTTP surface beyond `/healthz`. Three-signal scoring (keyword heuristics 30%, price anomaly 20%, LLM tone 50%) runs fully async after listing creation. |
-| **Payments** | Stripe Hosted Checkout | Flat fee per confirmed match (tier based on initial listing rent). Agreement add-on optional. Fee is locked to initial rent at conversation creation — immune to price manipulation. Webhook route as backup confirmation path. |
+| **Payments** | Stripe Hosted Checkout | Flat fee per confirmed match (tier based on initial listing rent). Fee is locked to initial rent at conversation creation — immune to price manipulation. Webhook route as backup confirmation path. |
 | **Vector DB** | Pinecone | Managed ANN index with metadata filtering. Hard constraints (university, rent ceiling, bedrooms) applied before re-ranking by cosine similarity — avoiding false positives from pure vector search. |
 | **Message Broker** | RabbitMQ | Durable queues decouple listing creation from the two expensive downstream operations (embedding + fraud scoring). Single-consumer queues are an architectural invariant. |
 | **Database** | PostgreSQL 16 | ACID guarantees for transactional data (rent in cents, confirmed_at). `uuid-ossp` and `pg_trgm` extensions. LATERAL subqueries for unread count and last message preview. `updated_at` triggers on all mutable tables. |
@@ -129,13 +128,11 @@ Visitor clicks magic link → /signup?token=X → verifies token
 
 Subly charges the lister a one-time match confirmation fee when they decide to proceed with a renter. The fee is based on the listing's rent **at the time the conversation was created** — not when payment is made — making it immune to price manipulation.
 
-| Monthly rent | Match fee | Agreement add-on |
-|---|---|---|
-| Under $1,000/mo | $29 | +$19 |
-| $1,000–$1,999/mo | $49 | +$19 |
-| $2,000+/mo | $79 | +$19 |
-
-The agreement add-on generates a pre-filled sublease agreement template with digital-signing guidance. It is optional and intended for situations where the leasing office is not handling paperwork directly.
+| Monthly rent | Match fee |
+|---|---|
+| Under $1,000/mo | $29 |
+| $1,000–$1,999/mo | $49 |
+| $2,000+/mo | $79 |
 
 No payment is required from the renter. There are no subscription fees, listing fees, or per-message charges.
 
