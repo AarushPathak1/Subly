@@ -39,7 +39,7 @@ func TestAuthMiddleware_NoAuthorizationHeader(t *testing.T) {
 	defer auth.Close()
 
 	called := false
-	mw := authMiddleware(auth.URL, upstreamRecorder(&called))
+	mw := authMiddleware(auth.URL, "", upstreamRecorder(&called))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/listings", nil)
 	w := httptest.NewRecorder()
@@ -58,7 +58,7 @@ func TestAuthMiddleware_AuthServiceReturnsError(t *testing.T) {
 	defer auth.Close()
 
 	called := false
-	mw := authMiddleware(auth.URL, upstreamRecorder(&called))
+	mw := authMiddleware(auth.URL, "", upstreamRecorder(&called))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/listings", nil)
 	req.Header.Set("Authorization", "Bearer fake-token")
@@ -78,7 +78,7 @@ func TestAuthMiddleware_UserNotEduVerified(t *testing.T) {
 	defer auth.Close()
 
 	called := false
-	mw := authMiddleware(auth.URL, upstreamRecorder(&called))
+	mw := authMiddleware(auth.URL, "", upstreamRecorder(&called))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/listings", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
@@ -104,7 +104,7 @@ func TestAuthMiddleware_ValidVerifiedUser_InjectsUserID(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	mw := authMiddleware(auth.URL, upstream)
+	mw := authMiddleware(auth.URL, "", upstream)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/listings", nil)
 	req.Header.Set("Authorization", "Bearer good-token")
@@ -116,6 +116,73 @@ func TestAuthMiddleware_ValidVerifiedUser_InjectsUserID(t *testing.T) {
 	}
 	if injectedID != userID {
 		t.Errorf("expected X-User-ID=%q, got %q", userID, injectedID)
+	}
+}
+
+func TestAuthMiddleware_InternalSecret_BypassesClerkAuth(t *testing.T) {
+	auth := newErrorAuthServer() // would reject any Clerk token
+	defer auth.Close()
+
+	var gotInternalCall string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotInternalCall = r.Header.Get("X-Internal-Call")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mw := authMiddleware(auth.URL, "my-secret", upstream)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/messages/conversations/c1/confirm", nil)
+	req.Header.Set("X-Internal-Secret", "my-secret")
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if gotInternalCall != "true" {
+		t.Errorf("expected X-Internal-Call=true, got %q", gotInternalCall)
+	}
+}
+
+func TestAuthMiddleware_InternalSecret_WrongSecret_Rejected(t *testing.T) {
+	auth := newErrorAuthServer()
+	defer auth.Close()
+
+	called := false
+	mw := authMiddleware(auth.URL, "correct-secret", upstreamRecorder(&called))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/messages/conversations/c1/confirm", nil)
+	req.Header.Set("X-Internal-Secret", "wrong-secret")
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+	if called {
+		t.Error("upstream should not be called with wrong internal secret")
+	}
+}
+
+func TestAuthMiddleware_InternalSecret_NotForwardedToUpstream(t *testing.T) {
+	auth := newErrorAuthServer()
+	defer auth.Close()
+
+	var forwardedSecret string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwardedSecret = r.Header.Get("X-Internal-Secret")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mw := authMiddleware(auth.URL, "my-secret", upstream)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/messages/conversations/c1/confirm", nil)
+	req.Header.Set("X-Internal-Secret", "my-secret")
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, req)
+
+	if forwardedSecret != "" {
+		t.Errorf("X-Internal-Secret should be stripped before forwarding, got %q", forwardedSecret)
 	}
 }
 
