@@ -221,9 +221,9 @@ describe("lister view (unconfirmed)", () => {
   it("dismiss button (×) closes the confirm panel", async () => {
     render(<ThreadClient {...defaultProps} isLister={true} confirmedAt={null} />);
     await userEvent.click(screen.getByRole("button", { name: /confirm match/i }));
-    expect(screen.getByText(/confirm this match/i)).toBeInTheDocument();
+    expect(screen.getByText("Match confirmation fee")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /×/i }));
-    expect(screen.queryByText(/confirm this match/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Match confirmation fee")).not.toBeInTheDocument();
   });
 });
 
