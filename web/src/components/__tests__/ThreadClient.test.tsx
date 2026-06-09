@@ -49,7 +49,6 @@ const defaultProps = {
   isLister: true,
   confirmedAt: null,
   initialRentCents: 120000, // $1,200 → $49 fee
-  includesAgreement: false,
   initialMessages: baseMessages,
 };
 
@@ -203,40 +202,12 @@ describe("lister view (unconfirmed)", () => {
     expect(screen.getByText("$79.00")).toBeInTheDocument();
   });
 
-  it("checking agreement shows combined total", async () => {
-    render(<ThreadClient {...defaultProps} isLister={true} confirmedAt={null} initialRentCents={120000} />);
-    await userEvent.click(screen.getByRole("button", { name: /confirm match/i }));
-    const checkbox = screen.getByRole("checkbox");
-    await userEvent.click(checkbox);
-    // $49 base + $19 agreement = $68
-    expect(screen.getByText("$68.00")).toBeInTheDocument();
-  });
-
-  it("unchecking agreement hides the total line", async () => {
-    render(<ThreadClient {...defaultProps} isLister={true} confirmedAt={null} initialRentCents={120000} />);
-    await userEvent.click(screen.getByRole("button", { name: /confirm match/i }));
-    const checkbox = screen.getByRole("checkbox");
-    await userEvent.click(checkbox);
-    await userEvent.click(checkbox);
-    expect(screen.queryByText("$68.00")).not.toBeInTheDocument();
-  });
-
   it("payment button calls createCheckoutSession with correct args", async () => {
     render(<ThreadClient {...defaultProps} isLister={true} confirmedAt={null} />);
     await userEvent.click(screen.getByRole("button", { name: /confirm match/i }));
     await userEvent.click(screen.getByRole("button", { name: /pay \$/i }));
     await waitFor(() =>
-      expect(mockCreateCheckoutSession).toHaveBeenCalledWith("c1", false)
-    );
-  });
-
-  it("payment button with agreement passes true to createCheckoutSession", async () => {
-    render(<ThreadClient {...defaultProps} isLister={true} confirmedAt={null} />);
-    await userEvent.click(screen.getByRole("button", { name: /confirm match/i }));
-    await userEvent.click(screen.getByRole("checkbox"));
-    await userEvent.click(screen.getByRole("button", { name: /pay \$/i }));
-    await waitFor(() =>
-      expect(mockCreateCheckoutSession).toHaveBeenCalledWith("c1", true)
+      expect(mockCreateCheckoutSession).toHaveBeenCalledWith("c1")
     );
   });
 
@@ -250,10 +221,9 @@ describe("lister view (unconfirmed)", () => {
   it("dismiss button (×) closes the confirm panel", async () => {
     render(<ThreadClient {...defaultProps} isLister={true} confirmedAt={null} />);
     await userEvent.click(screen.getByRole("button", { name: /confirm match/i }));
-    // Agreement checkbox is unique to the panel
-    expect(screen.getByRole("checkbox")).toBeInTheDocument();
+    expect(screen.getByText(/confirm this match/i)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /×/i }));
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByText(/confirm this match/i)).not.toBeInTheDocument();
   });
 });
 
@@ -303,8 +273,4 @@ describe("confirmed state", () => {
     expect(screen.queryByText(/no payment or action is needed/i)).not.toBeInTheDocument();
   });
 
-  it("notes agreement in confirmed banner when includes_agreement is true", () => {
-    render(<ThreadClient {...defaultProps} isLister={true} confirmedAt={confirmedAt} includesAgreement={true} />);
-    expect(screen.getByText(/agreement/i)).toBeInTheDocument();
-  });
 });

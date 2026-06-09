@@ -22,7 +22,6 @@ export async function POST(req: NextRequest) {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     const conversationId = session.metadata?.conversation_id;
-    const includesAgreement = session.metadata?.includes_agreement === "true";
 
     if (conversationId && session.payment_status === "paid") {
       // Best-effort backup confirmation — primary path is the success page.
@@ -33,10 +32,7 @@ export async function POST(req: NextRequest) {
           "Content-Type": "application/json",
           "X-Internal-Secret": process.env.INTERNAL_SECRET ?? "",
         },
-        body: JSON.stringify({
-          stripe_session_id: session.id,
-          includes_agreement: includesAgreement,
-        }),
+        body: JSON.stringify({ stripe_session_id: session.id }),
       }).catch(() => {});
     }
   }

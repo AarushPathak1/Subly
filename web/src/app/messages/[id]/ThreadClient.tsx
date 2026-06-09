@@ -15,7 +15,6 @@ interface ThreadClientProps {
   isLister: boolean;
   confirmedAt: string | null;
   initialRentCents: number;
-  includesAgreement: boolean;
   initialMessages: ChatMessage[];
 }
 
@@ -25,7 +24,6 @@ export function ThreadClient({
   isLister,
   confirmedAt: initialConfirmedAt,
   initialRentCents,
-  includesAgreement: initialIncludesAgreement,
   initialMessages,
 }: ThreadClientProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
@@ -33,13 +31,11 @@ export function ThreadClient({
   const [sending, setSending] = useState(false);
   const [confirmedAt, setConfirmedAt] = useState(initialConfirmedAt);
   const [showConfirmPanel, setShowConfirmPanel] = useState(false);
-  const [wantsAgreement, setWantsAgreement] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const isConfirmed = !!confirmedAt;
-  const baseFee = calculateMatchFee(initialRentCents);
-  const totalFee = baseFee + (wantsAgreement ? 1900 : 0);
+  const fee = calculateMatchFee(initialRentCents);
   const rentDisplay = `$${Math.round(initialRentCents / 100).toLocaleString()}/mo`;
 
   useEffect(() => {
@@ -78,7 +74,7 @@ export function ThreadClient({
 
   const handleProceedToPayment = async () => {
     setCheckoutLoading(true);
-    const result = await createCheckoutSession(conversationId, wantsAgreement);
+    const result = await createCheckoutSession(conversationId);
     if ("error" in result) {
       setCheckoutLoading(false);
       return;
@@ -98,7 +94,7 @@ export function ThreadClient({
             </svg>
           </span>
           <p className="text-sm text-emerald-800 font-medium">
-            Match confirmed{initialIncludesAgreement ? " · Sublease agreement included" : ""} — you&apos;re both moving forward.
+            Match confirmed — you&apos;re both moving forward.
           </p>
         </div>
       ) : isLister ? (
@@ -129,30 +125,8 @@ export function ThreadClient({
               <div className="bg-white rounded-xl border border-indigo-100 divide-y divide-slate-100 text-sm">
                 <div className="flex justify-between px-4 py-3">
                   <span className="text-slate-700">Match confirmation fee</span>
-                  <span className="font-semibold text-slate-900">${(baseFee / 100).toFixed(2)}</span>
+                  <span className="font-semibold text-slate-900">${(fee / 100).toFixed(2)}</span>
                 </div>
-                <div className="flex items-start gap-3 px-4 py-3">
-                  <input
-                    id="agreement"
-                    type="checkbox"
-                    checked={wantsAgreement}
-                    onChange={(e) => setWantsAgreement(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <label htmlFor="agreement" className="flex-1 cursor-pointer">
-                    <span className="font-medium text-slate-800">+ Sublease agreement</span>
-                    <span className="text-slate-500"> — $19.00</span>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Pre-filled agreement with digital signing for both parties. Only needed if your leasing office isn&apos;t handling paperwork.
-                    </p>
-                  </label>
-                </div>
-                {wantsAgreement && (
-                  <div className="flex justify-between px-4 py-3 bg-indigo-50/50">
-                    <span className="font-semibold text-slate-800">Total</span>
-                    <span className="font-bold text-indigo-700">${(totalFee / 100).toFixed(2)}</span>
-                  </div>
-                )}
               </div>
 
               <p className="text-xs text-slate-500">
@@ -164,7 +138,7 @@ export function ThreadClient({
                 disabled={checkoutLoading}
                 className="w-full py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition"
               >
-                {checkoutLoading ? "Redirecting to payment…" : `Pay $${(totalFee / 100).toFixed(2)} and confirm`}
+                {checkoutLoading ? "Redirecting to payment…" : `Pay $${(fee / 100).toFixed(2)} and confirm`}
               </button>
             </div>
           )}

@@ -91,7 +91,6 @@ describe("sendMatchConfirmedEmail", () => {
       renterId: RENTER_ID,
       listingTitle: "Cozy 1BR",
       conversationId: CONV_ID,
-      includesAgreement: false,
     });
     expect(mockSend).toHaveBeenCalledTimes(2);
     const recipients = mockSend.mock.calls.map((c) => c[0].to);
@@ -105,7 +104,6 @@ describe("sendMatchConfirmedEmail", () => {
       renterId: RENTER_ID,
       listingTitle: "Sunny 2BR",
       conversationId: CONV_ID,
-      includesAgreement: false,
     });
     const listerEmail = mockSend.mock.calls.find((c) => c[0].to === "lister@wisc.edu")[0];
     expect(listerEmail.subject).toContain("Sunny 2BR");
@@ -117,7 +115,6 @@ describe("sendMatchConfirmedEmail", () => {
       renterId: RENTER_ID,
       listingTitle: "Studio",
       conversationId: CONV_ID,
-      includesAgreement: false,
     });
     const renterEmail = mockSend.mock.calls.find((c) => c[0].to === "renter@umn.edu")[0];
     expect(renterEmail.subject.toLowerCase()).toContain("confirmed");
@@ -129,36 +126,9 @@ describe("sendMatchConfirmedEmail", () => {
       renterId: RENTER_ID,
       listingTitle: "Studio",
       conversationId: CONV_ID,
-      includesAgreement: false,
     });
     for (const [call] of mockSend.mock.calls) {
       expect(call.html).toContain(`/messages/${CONV_ID}`);
-    }
-  });
-
-  it("includes agreement note in both emails when includesAgreement is true", async () => {
-    await sendMatchConfirmedEmail({
-      listerId: LISTER_ID,
-      renterId: RENTER_ID,
-      listingTitle: "Studio",
-      conversationId: CONV_ID,
-      includesAgreement: true,
-    });
-    for (const [call] of mockSend.mock.calls) {
-      expect(call.html.toLowerCase()).toContain("agreement");
-    }
-  });
-
-  it("does not include agreement note when includesAgreement is false", async () => {
-    await sendMatchConfirmedEmail({
-      listerId: LISTER_ID,
-      renterId: RENTER_ID,
-      listingTitle: "Studio",
-      conversationId: CONV_ID,
-      includesAgreement: false,
-    });
-    for (const [call] of mockSend.mock.calls) {
-      expect(call.html).not.toContain("agreement");
     }
   });
 
@@ -168,7 +138,6 @@ describe("sendMatchConfirmedEmail", () => {
       renterId: RENTER_ID,
       listingTitle: "Studio",
       conversationId: CONV_ID,
-      includesAgreement: false,
     });
     expect(mockSend).toHaveBeenCalledTimes(1);
     expect(mockSend.mock.calls[0][0].to).toBe("renter@umn.edu");
@@ -180,7 +149,6 @@ describe("sendMatchConfirmedEmail", () => {
       renterId: "nonexistent",
       listingTitle: "Studio",
       conversationId: CONV_ID,
-      includesAgreement: false,
     });
     expect(mockSend).toHaveBeenCalledTimes(1);
     expect(mockSend.mock.calls[0][0].to).toBe("lister@wisc.edu");
@@ -294,25 +262,10 @@ describe("consumeNotifications", () => {
         renter_id: RENTER_ID,
         listing_title: "Great place",
         conversation_id: CONV_ID,
-        includes_agreement: false,
       });
       await getConsumers()["notifications.match_confirmed"](msg);
       expect(mockSend).toHaveBeenCalledTimes(2);
       expect(mockChannel.ack).toHaveBeenCalledWith(msg);
-    });
-
-    it("passes includes_agreement flag to email function", async () => {
-      const msg = makeMsg({
-        lister_id: LISTER_ID,
-        renter_id: RENTER_ID,
-        listing_title: "Great place",
-        conversation_id: CONV_ID,
-        includes_agreement: true,
-      });
-      await getConsumers()["notifications.match_confirmed"](msg);
-      for (const [call] of mockSend.mock.calls) {
-        expect(call.html.toLowerCase()).toContain("agreement");
-      }
     });
 
     it("acks even if email send throws", async () => {
@@ -322,7 +275,6 @@ describe("consumeNotifications", () => {
         renter_id: RENTER_ID,
         listing_title: "Great place",
         conversation_id: CONV_ID,
-        includes_agreement: false,
       });
       await getConsumers()["notifications.match_confirmed"](msg);
       expect(mockChannel.ack).toHaveBeenCalledWith(msg);

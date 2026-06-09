@@ -68,7 +68,6 @@ CREATE TABLE IF NOT EXISTS conversations (
     initial_rent_cents  INT NOT NULL DEFAULT 0,
     confirmed_at        TIMESTAMPTZ,
     stripe_session_id   TEXT,
-    includes_agreement  BOOLEAN NOT NULL DEFAULT FALSE,
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT conversations_listing_renter_unique UNIQUE (listing_id, renter_id)
 );

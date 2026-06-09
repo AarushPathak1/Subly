@@ -81,7 +81,6 @@ const mockConversation = {
   other_email: "lister@ut.edu",
   created_at: "2026-06-01T00:00:00Z",
   initial_rent_cents: 120000,
-  includes_agreement: false,
 };
 
 describe("fetchConversation", () => {
@@ -181,11 +180,11 @@ describe("createCheckoutSession", () => {
     mockStripeCreate.mockClear();
   });
 
-  it("returns Stripe checkout URL without agreement", async () => {
+  it("returns Stripe checkout URL", async () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockConversation });
     mockStripeCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/test" });
 
-    const result = await createCheckoutSession("conv-1", false);
+    const result = await createCheckoutSession("conv-1");
     expect(result).toEqual({ url: "https://checkout.stripe.com/test" });
     expect(mockStripeCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -197,29 +196,19 @@ describe("createCheckoutSession", () => {
     );
   });
 
-  it("adds agreement line item when includesAgreement is true", async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockConversation });
-    mockStripeCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/test" });
-
-    await createCheckoutSession("conv-1", true);
-    const call = mockStripeCreate.mock.calls[0][0];
-    expect(call.line_items).toHaveLength(2);
-    expect(call.line_items[1].price_data.unit_amount).toBe(1900);
-  });
-
   it("uses correct fee tier based on initial_rent_cents", async () => {
     const cheapConv = { ...mockConversation, initial_rent_cents: 80000 };
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => cheapConv });
     mockStripeCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/test" });
 
-    await createCheckoutSession("conv-1", false);
+    await createCheckoutSession("conv-1");
     const call = mockStripeCreate.mock.calls[0][0];
     expect(call.line_items[0].price_data.unit_amount).toBe(2900);
   });
 
   it("returns error when conversation fetch fails", async () => {
     mockFetch.mockResolvedValueOnce({ ok: false });
-    expect(await createCheckoutSession("conv-1", false)).toEqual({ error: "Conversation not found" });
+    expect(await createCheckoutSession("conv-1")).toEqual({ error: "Conversation not found" });
     expect(mockStripeCreate).not.toHaveBeenCalled();
   });
 
@@ -227,7 +216,7 @@ describe("createCheckoutSession", () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockConversation });
     mockStripeCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/test" });
 
-    await createCheckoutSession("conv-1", false);
+    await createCheckoutSession("conv-1");
     const call = mockStripeCreate.mock.calls[0][0];
     expect(call.metadata.conversation_id).toBe("conv-1");
   });
@@ -236,7 +225,7 @@ describe("createCheckoutSession", () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockConversation });
     mockStripeCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/test" });
 
-    await createCheckoutSession("conv-1", false);
+    await createCheckoutSession("conv-1");
     const call = mockStripeCreate.mock.calls[0][0];
     expect(call.success_url).toContain("conv-1/confirmed");
     expect(call.cancel_url).toContain("conv-1");
@@ -255,7 +244,7 @@ describe("verifyAndConfirmMatch", () => {
     mockStripeRetrieve.mockResolvedValueOnce({ payment_status: "paid" });
     mockFetch.mockResolvedValueOnce({ ok: true });
 
-    const result = await verifyAndConfirmMatch("conv-1", "sess_123", false);
+    const result = await verifyAndConfirmMatch("conv-1", "sess_123");
     expect(result).toEqual({});
     expect(mockStripeRetrieve).toHaveBeenCalledWith("sess_123");
     expect(mockFetch).toHaveBeenCalledWith(
@@ -266,28 +255,27 @@ describe("verifyAndConfirmMatch", () => {
 
   it("returns error when Stripe payment_status is not paid", async () => {
     mockStripeRetrieve.mockResolvedValueOnce({ payment_status: "unpaid" });
-    expect(await verifyAndConfirmMatch("conv-1", "sess_123", false)).toEqual({ error: "Payment not completed" });
+    expect(await verifyAndConfirmMatch("conv-1", "sess_123")).toEqual({ error: "Payment not completed" });
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("returns error when Stripe API throws", async () => {
     mockStripeRetrieve.mockRejectedValueOnce(new Error("Stripe error"));
-    expect(await verifyAndConfirmMatch("conv-1", "sess_123", false)).toEqual({ error: "Could not verify payment" });
+    expect(await verifyAndConfirmMatch("conv-1", "sess_123")).toEqual({ error: "Could not verify payment" });
   });
 
   it("returns error when confirm endpoint fails", async () => {
     mockStripeRetrieve.mockResolvedValueOnce({ payment_status: "paid" });
     mockFetch.mockResolvedValueOnce({ ok: false });
-    expect(await verifyAndConfirmMatch("conv-1", "sess_123", false)).toEqual({ error: "Failed to confirm match" });
+    expect(await verifyAndConfirmMatch("conv-1", "sess_123")).toEqual({ error: "Failed to confirm match" });
   });
 
-  it("passes includes_agreement correctly to confirm body", async () => {
+  it("passes stripe_session_id in confirm body", async () => {
     mockStripeRetrieve.mockResolvedValueOnce({ payment_status: "paid" });
     mockFetch.mockResolvedValueOnce({ ok: true });
 
-    await verifyAndConfirmMatch("conv-1", "sess_123", true);
+    await verifyAndConfirmMatch("conv-1", "sess_123");
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.includes_agreement).toBe(true);
     expect(body.stripe_session_id).toBe("sess_123");
   });
 });

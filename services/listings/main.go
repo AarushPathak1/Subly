@@ -49,7 +49,6 @@ type Conversation struct {
 	CreatedAt         time.Time  `json:"created_at"`
 	InitialRentCents  int        `json:"initial_rent_cents"`
 	ConfirmedAt       *time.Time `json:"confirmed_at,omitempty"`
-	IncludesAgreement bool       `json:"includes_agreement"`
 }
 
 type UserProfile struct {
@@ -414,7 +413,7 @@ func (s *server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		       c.renter_id, c.lister_id,
 		       CASE WHEN c.renter_id = $2 THEN ul.email ELSE ur.email END,
 		       c.last_message_at, c.created_at, '', 0,
-		       c.initial_rent_cents, c.confirmed_at, c.includes_agreement
+		       c.initial_rent_cents, c.confirmed_at
 		FROM conversations c
 		JOIN listings l  ON l.id  = c.listing_id
 		JOIN users ur    ON ur.id = c.renter_id
@@ -424,7 +423,7 @@ func (s *server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	).Scan(&c.ID, &c.ListingID, &c.ListingTitle,
 		&c.RenterID, &c.ListerID, &c.OtherEmail,
 		&lastMsgAt, &c.CreatedAt, &c.LastMessage, &c.UnreadCount,
-		&c.InitialRentCents, &confirmedAt, &c.IncludesAgreement)
+		&c.InitialRentCents, &confirmedAt)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
@@ -565,8 +564,7 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var body struct {
-		StripeSessionID   string `json:"stripe_session_id"`
-		IncludesAgreement bool   `json:"includes_agreement"`
+		StripeSessionID string `json:"stripe_session_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid body"))
@@ -592,21 +590,19 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 	if _, err := s.db.Exec(ctx, `
 		UPDATE conversations
 		SET confirmed_at      = COALESCE(confirmed_at, NOW()),
-		    stripe_session_id = $2,
-		    includes_agreement = $3
+		    stripe_session_id = $2
 		WHERE id = $1`,
-		id, body.StripeSessionID, body.IncludesAgreement,
+		id, body.StripeSessionID,
 	); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	s.publishNotification("notifications.match_confirmed", map[string]interface{}{
-		"lister_id":          listerID,
-		"renter_id":          renterID,
-		"listing_title":      listingTitle,
-		"conversation_id":    id,
-		"includes_agreement": body.IncludesAgreement,
+		"lister_id":       listerID,
+		"renter_id":       renterID,
+		"listing_title":   listingTitle,
+		"conversation_id": id,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "confirmed"})

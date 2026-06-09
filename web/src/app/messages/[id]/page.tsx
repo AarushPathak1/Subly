@@ -57,7 +57,6 @@ export default async function ThreadPage({ params }: { params: { id: string } })
             isLister={isLister}
             confirmedAt={conversation.confirmed_at ?? null}
             initialRentCents={conversation.initial_rent_cents}
-            includesAgreement={conversation.includes_agreement}
             initialMessages={messages}
           />
         </div>

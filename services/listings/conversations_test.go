@@ -413,7 +413,7 @@ func TestIntegration_ConfirmConversation(t *testing.T) {
 	convID := seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
 	s := &server{db: db}
 
-	body := `{"stripe_session_id":"sess_test123","includes_agreement":false}`
+	body := `{"stripe_session_id":"sess_test123"}`
 	req := httptest.NewRequest(http.MethodPost, "/conversations/"+convID+"/confirm", bytes.NewBufferString(body))
 	req.SetPathValue("id", convID)
 	req.Header.Set("Content-Type", "application/json")
@@ -447,7 +447,7 @@ func TestIntegration_ConfirmConversation_OnlyListerCanConfirm(t *testing.T) {
 	convID := seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
 	s := &server{db: db}
 
-	body := `{"stripe_session_id":"sess_test123","includes_agreement":false}`
+	body := `{"stripe_session_id":"sess_test123"}`
 	req := httptest.NewRequest(http.MethodPost, "/conversations/"+convID+"/confirm", bytes.NewBufferString(body))
 	req.SetPathValue("id", convID)
 	req.Header.Set("Content-Type", "application/json")
@@ -469,7 +469,7 @@ func TestIntegration_ConfirmConversation_Idempotent(t *testing.T) {
 	s := &server{db: db}
 
 	confirm := func() {
-		body := `{"stripe_session_id":"sess_abc","includes_agreement":false}`
+		body := `{"stripe_session_id":"sess_abc"}`
 		req := httptest.NewRequest(http.MethodPost, "/conversations/"+convID+"/confirm", bytes.NewBufferString(body))
 		req.SetPathValue("id", convID)
 		req.Header.Set("Content-Type", "application/json")
@@ -498,31 +498,3 @@ func TestIntegration_ConfirmConversation_Idempotent(t *testing.T) {
 	}
 }
 
-func TestIntegration_ConfirmConversation_WithAgreement(t *testing.T) {
-	db := requireDB(t)
-	seedTestUser(t, db)
-	seedSecondUser(t, db, testListerID, "lister@university.edu")
-	listingID := seedTestListing(t, db, testListerID, 120000)
-	convID := seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
-	s := &server{db: db}
-
-	body := `{"stripe_session_id":"sess_agree","includes_agreement":true}`
-	req := httptest.NewRequest(http.MethodPost, "/conversations/"+convID+"/confirm", bytes.NewBufferString(body))
-	req.SetPathValue("id", convID)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-ID", testListerID)
-	w := httptest.NewRecorder()
-	s.handleConfirmConversation(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	var includesAgreement bool
-	db.QueryRow(context.Background(),
-		`SELECT includes_agreement FROM conversations WHERE id = $1`, convID,
-	).Scan(&includesAgreement)
-	if !includesAgreement {
-		t.Error("expected includes_agreement=true in DB")
-	}
-}

@@ -125,9 +125,6 @@ export default function TermsPage() {
                   <li>Listings $2,000/mo and above — <strong>$79</strong></li>
                 </ul>
                 <p className="mb-3">
-                  An optional sublease agreement add-on is available for an additional <strong>$19</strong>. This generates a pre-filled agreement template; it is not a substitute for legal counsel and does not constitute a legally binding document on its own.
-                </p>
-                <p className="mb-3">
                   The fee is charged only to the lister and is non-refundable once payment is processed, except where required by applicable law. The fee is locked to the initial listing price at the time the conversation began and is not affected by any subsequent price changes.
                 </p>
                 <p className="mb-3">

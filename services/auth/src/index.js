@@ -48,16 +48,12 @@ async function sendNewMessageEmail({ recipientId, listingTitle, conversationId }
   console.log(`[auth] new message email sent to ${to}`);
 }
 
-async function sendMatchConfirmedEmail({ listerId, renterId, listingTitle, conversationId, includesAgreement }) {
+async function sendMatchConfirmedEmail({ listerId, renterId, listingTitle, conversationId }) {
   if (!resend) return;
   const [listerEmail, renterEmail] = await Promise.all([
     getUserEmail(listerId),
     getUserEmail(renterId),
   ]);
-
-  const agreementNote = includesAgreement
-    ? `<p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 16px">Your sublease agreement has been generated and is available in the conversation.</p>`
-    : "";
 
   if (listerEmail) {
     await resend.emails.send({
@@ -76,7 +72,6 @@ async function sendMatchConfirmedEmail({ listerId, renterId, listingTitle, conve
           <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px">
             Your match for <strong>${listingTitle}</strong> is confirmed. The renter has been notified.
           </p>
-          ${agreementNote}
           <a href="${APP_URL}/messages/${conversationId}"
             style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
             View conversation →
@@ -107,7 +102,6 @@ async function sendMatchConfirmedEmail({ listerId, renterId, listingTitle, conve
           <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px">
             The lister has officially confirmed your match for <strong>${listingTitle}</strong>. Reach out to coordinate next steps.
           </p>
-          ${agreementNote}
           <a href="${APP_URL}/messages/${conversationId}"
             style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
             View conversation →
@@ -173,8 +167,8 @@ async function consumeNotifications(ch) {
   ch.consume("notifications.match_confirmed", async (msg) => {
     if (!msg) return;
     try {
-      const { lister_id, renter_id, listing_title, conversation_id, includes_agreement } = JSON.parse(msg.content.toString());
-      await sendMatchConfirmedEmail({ listerId: lister_id, renterId: renter_id, listingTitle: listing_title, conversationId: conversation_id, includesAgreement: includes_agreement });
+      const { lister_id, renter_id, listing_title, conversation_id } = JSON.parse(msg.content.toString());
+      await sendMatchConfirmedEmail({ listerId: lister_id, renterId: renter_id, listingTitle: listing_title, conversationId: conversation_id });
     } catch (err) {
       console.error("[auth] match_confirmed notification error:", err);
     } finally {
