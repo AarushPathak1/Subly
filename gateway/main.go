@@ -44,9 +44,18 @@ func loggingMiddleware(next http.Handler) http.Handler {
 
 // authMiddleware validates the Clerk session via the auth service and injects X-User-ID.
 // Requests without a valid .edu-verified account are rejected before reaching the upstream.
-func authMiddleware(authServiceURL string, next http.Handler) http.Handler {
+// Internal service calls authenticated via X-Internal-Secret bypass Clerk validation.
+func authMiddleware(authServiceURL string, internalSecret string, next http.Handler) http.Handler {
 	client := &http.Client{Timeout: 5 * time.Second}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Internal service bypass — webhook and server-to-server calls
+		if internalSecret != "" && r.Header.Get("X-Internal-Secret") == internalSecret {
+			r.Header.Del("X-Internal-Secret")
+			r.Header.Set("X-Internal-Call", "true")
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		token := r.Header.Get("Authorization")
 		if token == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -99,6 +108,7 @@ func main() {
 	authURL := mustParseURL(envOr("AUTH_SERVICE_URL", "http://auth:3001"))
 	listingsURL := mustParseURL(envOr("LISTINGS_SERVICE_URL", "http://listings:3002"))
 	matchingURL := mustParseURL(envOr("MATCHING_SERVICE_URL", "http://matching:3003"))
+	internalSecret := os.Getenv("INTERNAL_SECRET")
 
 	routes := []route{
 		{prefix: "/api/auth", upstream: authURL},
@@ -119,7 +129,7 @@ func main() {
 		proxy := newReverseProxy(rt.upstream)
 		var h http.Handler = http.StripPrefix(prefix, proxy)
 		if prefix == "/api/listings" || prefix == "/api/messages" {
-			h = authMiddleware(authURL.String(), h)
+			h = authMiddleware(authURL.String(), internalSecret, h)
 		}
 		mux.Handle(prefix+"/", h)
 	}

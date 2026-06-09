@@ -29,7 +29,9 @@
       "Bash(npm list *)",
       "Bash(DATABASE_URL=\"postgresql://subly:subly_secret@localhost:5434/subly\" go test ./services/listings/... -v -count=1)",
       "Bash(DATABASE_URL=\"postgresql://subly:subly_secret@localhost:5434/subly\" go test -v -count=1 ./...)",
-      "Bash(DATABASE_URL=\"postgresql://subly:subly_secret@localhost:5434/subly\" go test -v -count=1)"
+      "Bash(DATABASE_URL=\"postgresql://subly:subly_secret@localhost:5434/subly\" go test -v -count=1)",
+      "Bash(DATABASE_URL=\"postgresql://subly:subly_secret@localhost:5434/subly\" go test ./... -v)",
+      "Bash(DATABASE_URL=\"postgresql://subly:subly_secret@localhost:5434/subly\" go test ./... -v -run \"Confirm\")"
     ]
   }
 }

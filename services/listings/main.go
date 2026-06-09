@@ -559,7 +559,8 @@ func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
+	isInternal := r.Header.Get("X-Internal-Call") == "true"
+	if userID == "" && !isInternal {
 		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
 		return
 	}
@@ -582,7 +583,7 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}
-	if listerID != userID {
+	if !isInternal && listerID != userID {
 		writeErr(w, http.StatusForbidden, fmt.Errorf("only the lister can confirm a match"))
 		return
 	}

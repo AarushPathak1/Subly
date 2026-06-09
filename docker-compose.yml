@@ -69,6 +69,7 @@ services:
       LISTINGS_SERVICE_URL: "http://listings:3002"
       MATCHING_SERVICE_URL: "http://matching:3003"
       ENV: ${ENV:-development}
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret-change-in-prod}
     depends_on:
       - auth
       - listings
