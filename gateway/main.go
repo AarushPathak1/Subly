@@ -110,6 +110,16 @@ func main() {
 	matchingURL := mustParseURL(envOr("MATCHING_SERVICE_URL", "http://matching:3003"))
 	internalSecret := os.Getenv("INTERNAL_SECRET")
 
+	if internalSecret == "" {
+		log.Fatal("[gateway] INTERNAL_SECRET must be set")
+	}
+	if internalSecret == "dev-internal-secret-change-in-prod" {
+		log.Println("[gateway] WARNING: INTERNAL_SECRET is the default dev value — change it before going to production")
+	}
+	if os.Getenv("ALLOWED_ORIGINS") == "" {
+		log.Println("[gateway] WARNING: ALLOWED_ORIGINS not set — CORS will allow all origins")
+	}
+
 	routes := []route{
 		{prefix: "/api/auth", upstream: authURL},
 		{prefix: "/api/listings", upstream: listingsURL},

@@ -726,6 +726,8 @@ func writeErr(w http.ResponseWriter, status int, err error) {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 func main() {
+	requireEnv("DATABASE_URL", "RABBITMQ_URL", "AUTH_SERVICE_URL")
+
 	ctx := context.Background()
 
 	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
@@ -737,7 +739,7 @@ func main() {
 	var mqCh *amqp.Channel
 	mqConn, err := amqp.Dial(os.Getenv("RABBITMQ_URL"))
 	if err != nil {
-		log.Printf("[listings] rabbitmq connect failed (non-fatal): %v", err)
+		log.Fatalf("[listings] rabbitmq connect: %v", err)
 	} else {
 		mqCh, _ = mqConn.Channel()
 		mqCh.QueueDeclare("listing.scam_check", true, false, false, false, nil)
@@ -768,4 +770,16 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func requireEnv(keys ...string) {
+	var missing []string
+	for _, k := range keys {
+		if os.Getenv(k) == "" {
+			missing = append(missing, k)
+		}
+	}
+	if len(missing) > 0 {
+		log.Fatalf("[listings] missing required env vars: %s", strings.Join(missing, ", "))
+	}
 }

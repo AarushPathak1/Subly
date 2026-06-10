@@ -587,6 +587,15 @@ app.post("/invite-request/redeem", requireAuth(), async (req, res) => {
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 if (require.main === module) {
+  const required = ["DATABASE_URL", "RABBITMQ_URL", "CLERK_SECRET_KEY", "INVITE_SECRET", "ADMIN_SECRET"];
+  const missing = required.filter((k) => !process.env[k]);
+  if (missing.length) {
+    console.error(`[auth] missing required env vars: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+  if (!process.env.RESEND_API_KEY) {
+    console.warn("[auth] RESEND_API_KEY not set — email notifications disabled");
+  }
   connectMQ().catch(console.error);
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => console.log(`[auth] listening on :${PORT}`));

@@ -21,6 +21,13 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("matching")
 
+# ─── Startup env validation ───────────────────────────────────────────────────
+
+_required = ["DATABASE_URL", "RABBITMQ_URL", "OPENAI_API_KEY", "PINECONE_API_KEY"]
+_missing = [k for k in _required if not os.environ.get(k)]
+if _missing:
+    raise RuntimeError(f"[matching] missing required env vars: {', '.join(_missing)}")
+
 # ─── Clients ─────────────────────────────────────────────────────────────────
 
 openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
