@@ -26,14 +26,21 @@ export async function POST(req: NextRequest) {
     if (conversationId && session.payment_status === "paid") {
       // Best-effort backup confirmation — primary path is the success page.
       // Uses an internal service header to bypass user auth on the listings service.
-      await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/confirm`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Internal-Secret": process.env.INTERNAL_SECRET ?? "",
-        },
-        body: JSON.stringify({ stripe_session_id: session.id }),
-      }).catch(() => {});
+      try {
+        const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/confirm`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Internal-Secret": process.env.INTERNAL_SECRET ?? "",
+          },
+          body: JSON.stringify({ stripe_session_id: session.id }),
+        });
+        if (!res.ok) {
+          console.error(`[webhook] confirm failed for conversation ${conversationId}: HTTP ${res.status}`);
+        }
+      } catch (err) {
+        console.error(`[webhook] confirm fetch threw for conversation ${conversationId}:`, err);
+      }
     }
   }
 

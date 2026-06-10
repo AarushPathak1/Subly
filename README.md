@@ -138,6 +138,20 @@ No payment is required from the renter. There are no subscription fees, listing 
 
 ---
 
+## Database Migrations
+
+`infra/postgres/init.sql` is applied automatically on first boot via the Docker entrypoint. For existing databases, apply the numbered migrations in order:
+
+```bash
+psql $DATABASE_URL -f infra/postgres/migrate_chat.sql       # 1 — chat columns
+psql $DATABASE_URL -f infra/postgres/migrate_payments.sql   # 2 — payment columns
+psql $DATABASE_URL -f infra/postgres/migrate_expiration.sql # 3 — expired status enum
+```
+
+All statements are idempotent (`IF NOT EXISTS`) except the enum addition in migration 3, which uses `ADD VALUE IF NOT EXISTS` and must **not** be run inside a transaction block.
+
+---
+
 ## Pages & Routes
 
 | Route | Auth | Purpose |

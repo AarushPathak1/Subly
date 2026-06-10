@@ -1,5 +1,5 @@
--- Run this once against an existing DB to add chat support.
--- Safe to re-run (all statements are idempotent).
+-- Migration 1 of 3 — chat columns and indexes
+-- Run after init.sql. Safe to re-run (all statements are idempotent).
 
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS renter_read_at  TIMESTAMPTZ;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lister_read_at  TIMESTAMPTZ;
