@@ -224,3 +224,39 @@ jobs:
 
       - name: Run auth unit tests
         run: npm test
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 7: Deploy to Railway
+  #
+  # Only runs on pushes to main (not on PRs) and only after every test job
+  # passes. `needs:` lists all test jobs — if any fail this job is skipped.
+  #
+  # Each service is deployed in parallel using Railway's --detach flag, which
+  # fires the deploy and returns immediately without waiting for it to finish.
+  # Railway streams build logs in its own dashboard.
+  #
+  # Required secret: RAILWAY_TOKEN
+  #   Railway dashboard → Account Settings → Tokens → Create token
+  #   GitHub repo → Settings → Secrets → Actions → New secret → RAILWAY_TOKEN
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy:
+    needs: [test-web, test-gateway, test-listings, test-matching, test-trust, test-auth]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy services
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up --service web      --detach
+          railway up --service gateway  --detach
+          railway up --service auth     --detach
+          railway up --service listings --detach
+          railway up --service matching --detach
+          railway up --service trust    --detach
