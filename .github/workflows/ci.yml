@@ -82,15 +82,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Go equivalent of setup-node. `cache: true` caches the module download cache.
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: true
+          cache-dependency-path: gateway/go.sum
 
-      # `go test ./...` runs every test file in every package under this directory.
-      # -v = verbose output (show each test name)
-      # -count=1 = disable Go's test result caching so tests always re-run
       - name: Run gateway tests
         run: go test ./... -v -count=1
 
@@ -116,6 +113,7 @@ jobs:
         with:
           go-version: "1.22"
           cache: true
+          cache-dependency-path: services/listings/go.sum
 
       - name: Start PostgreSQL and create test database
         run: |
@@ -243,6 +241,10 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "RAILWAY_TOKEN not set — skipping deploy. Add it to repo secrets when Railway is configured."
+            exit 0
+          fi
           railway up --service web      --detach
           railway up --service gateway  --detach
           railway up --service auth     --detach
