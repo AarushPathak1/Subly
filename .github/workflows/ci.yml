@@ -107,24 +107,8 @@ jobs:
       run:
         working-directory: services/listings
 
-    # `services:` starts Docker containers before your steps run.
-    # They're automatically stopped and removed after the job finishes.
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: subly
-          POSTGRES_PASSWORD: subly_secret
-          POSTGRES_DB: subly
-        # health check: wait until Postgres is actually ready before steps run
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        # Map container port 5432 to host port 5432 so tests can reach it
-        ports:
-          - 5432:5432
+    # ubuntu-latest ships with PostgreSQL pre-installed — no Docker pull needed.
+    # This avoids Docker Hub rate-limit failures on GitHub Actions shared runners.
 
     steps:
       - uses: actions/checkout@v4
@@ -132,6 +116,12 @@ jobs:
         with:
           go-version: "1.22"
           cache: true
+
+      - name: Start PostgreSQL and create test database
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -c "CREATE USER subly WITH PASSWORD 'subly_secret';"
+          sudo -u postgres psql -c "CREATE DATABASE subly OWNER subly;"
 
       # Run the init.sql schema script so the tables exist before tests run.
       # PGPASSWORD is how psql accepts a password non-interactively.
@@ -141,13 +131,12 @@ jobs:
             -h localhost -U subly -d subly \
             -f ../../infra/postgres/init.sql
 
-      # Pass DATABASE_URL as an env var so the integration tests can connect.
-      # RABBITMQ_URL is empty — integration tests that need it are skipped.
+      # RABBITMQ_URL is unset — tests that publish events skip gracefully
+      # because main() (which calls requireEnv) is never invoked by go test.
       - name: Run listings tests
         run: go test ./... -v -count=1
         env:
           DATABASE_URL: postgresql://subly:subly_secret@localhost:5432/subly
-          RABBITMQ_URL: ""
 
   # ────────────────────────────────────────────────────────────────────────────
   # JOB 4: Matching service (Python — unit + mocked API tests)
