@@ -82,7 +82,7 @@ Browser → Gateway (auth check) → Listings Service → Postgres (draft)
 ```
 Renter clicks "Message lister" on listing detail
   → Listings Service: upsert conversation (listing_id, renter_id) — idempotent
-  → Thread opens with 5s polling
+  → Thread opens with 30s polling
 
 Both parties chat in-app
   → Lister clicks "Confirm this match" → fee panel shown (tier based on initial rent)
@@ -168,7 +168,7 @@ All statements are idempotent (`IF NOT EXISTS`) except the enum addition in migr
 | `/listings/[id]/edit` | Clerk + owner | Edit listing (ownership enforced server-side) |
 | `/messages` | Clerk + edu | Inbox — all conversations with unread indicators |
 | `/messages/[id]` | Clerk + edu | Thread — chat, confirm panel (lister), renter info banner |
-| `/messages/[id]/confirmed` | Clerk + edu | Post-payment page — verifies Stripe session, marks match confirmed, renders agreement if purchased |
+| `/messages/[id]/confirmed` | Clerk + edu | Post-payment page — verifies Stripe session, marks match confirmed |
 | `/admin/invites` | Admin only | Review and approve/reject invite requests |
 | `/privacy`, `/terms`, `/cookies` | Public | Legal pages (includes payment terms and Stripe disclosure) |
 
@@ -255,7 +255,7 @@ Credentials stay server-side. Each key is namespaced `listings/{uuid}/{sanitized
 |---|---|---|---|
 | Web — schemas | Vitest | 29 | Zod validation for all form schemas |
 | Web — server actions | Vitest + fetch mocks | 27 | Fee calculation, fetch resilience, Stripe checkout session creation and payment verification |
-| Web — ThreadClient | Vitest + Testing Library | 32 | Message rendering, send input, polling, confirm panel (fee tiers, agreement checkbox, Stripe redirect), renter/lister/confirmed banners |
+| Web — ThreadClient | Vitest + Testing Library | 32 | Message rendering, send input, polling, confirm panel (fee tiers, Stripe redirect), renter/lister/confirmed banners |
 | Web — AppNavUI | Vitest + Testing Library | 15 | Unread badge boundaries, nav links, back arrow, active highlighting |
 | Web — components | Vitest + Testing Library | 16 | GetStartedFlow, UniversityCombobox |
 | Listings service | Go testing + httptest | 27 | Conversation lifecycle (create, list, get, send, confirm), access control, idempotency, field capture |
@@ -300,12 +300,16 @@ Fill in `.env`:
 | `AWS_*`, `S3_BUCKET_NAME` | AWS Console → S3 + IAM user with `s3:PutObject`. Optional — omit to test without image uploads. |
 | `RESEND_API_KEY` | [resend.com](https://resend.com). Optional — magic links log to stdout when unset. |
 
-### 2. Run the DB migration (first time, or after a reset)
+### 2. Run the DB migrations (first time, or after a reset)
 
 ```bash
 docker compose up postgres -d
-docker exec subly-postgres psql -U subly -d subly -c "$(cat infra/postgres/migrate_payments.sql)"
+psql $DATABASE_URL -f infra/postgres/migrate_chat.sql       # 1 — chat columns
+psql $DATABASE_URL -f infra/postgres/migrate_payments.sql   # 2 — payment columns
+psql $DATABASE_URL -f infra/postgres/migrate_expiration.sql # 3 — expired status enum (not transactional)
 ```
+
+`init.sql` is applied automatically on first boot. The numbered migrations are for existing databases only.
 
 ### 3. Start all services
 
@@ -319,8 +323,7 @@ First build takes ~3 minutes. Eight containers start together.
 |---|---|
 | Web app | http://localhost:3000 |
 | Gateway | http://localhost:8080/healthz |
-| RabbitMQ management | http://localhost:15672 (`subly` / `subly_secret`) |
-| Postgres | `localhost:5434` (`subly` / `subly_secret` / db: `subly`) |
+| Postgres | `localhost:5434` (credentials from your `.env`) |
 
 ### 4. Test the full loop
 
@@ -388,8 +391,9 @@ subly/
 ├── infra/
 │   ├── postgres/
 │   │   ├── init.sql               # Full schema (users, listings, conversations, messages, ...)
-│   │   ├── migrate_chat.sql       # Migration: add messaging columns
-│   │   └── migrate_payments.sql   # Migration: add payment confirmation columns
+│   │   ├── migrate_chat.sql       # Migration 1: add messaging columns
+│   │   ├── migrate_payments.sql   # Migration 2: add payment confirmation columns
+│   │   └── migrate_expiration.sql # Migration 3: add expired status enum
 │   └── rabbitmq/
 ├── docker-compose.yml
 └── .env.example
@@ -399,19 +403,21 @@ subly/
 
 ## Environment Variables
 
-```bash
-# Infrastructure (defaults work locally)
-POSTGRES_USER=subly
-POSTGRES_PASSWORD=subly_secret
-POSTGRES_DB=subly
-RABBITMQ_USER=subly
-RABBITMQ_PASS=subly_secret
+All variables marked **required** must be present in `.env` — docker-compose will fail loudly if they are missing (uses `:?` expansion, not silent defaults).
 
-# Clerk (required)
+```bash
+# Infrastructure
+POSTGRES_USER=subly          # default fine
+POSTGRES_PASSWORD=            # required — no default
+POSTGRES_DB=subly            # default fine
+RABBITMQ_USER=subly          # default fine
+RABBITMQ_PASS=               # required — no default
+
+# Clerk (required — https://dashboard.clerk.com)
 CLERK_SECRET_KEY=sk_test_...
 CLERK_PUBLISHABLE_KEY=pk_test_...
 
-# OpenAI (embeddings + fraud LLM — required)
+# OpenAI — embeddings + fraud LLM (required)
 OPENAI_API_KEY=sk-...
 
 # Pinecone (required)
@@ -423,6 +429,17 @@ STRIPE_SECRET_KEY=sk_test_...
 STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
+# Service-to-service auth (required)
+INTERNAL_SECRET=             # required — generate a random secret
+
+# Admin and invite secrets (required)
+ADMIN_SECRET=                # required — generate a random secret
+ADMIN_USER_IDS=user_clerk_id_1,user_clerk_id_2
+INVITE_SECRET=               # required — generate a random secret
+
+# URLs
+APP_URL=http://localhost:3000
+
 # AWS S3 — listing image uploads via pre-signed URLs (optional)
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=...
@@ -432,13 +449,4 @@ S3_BUCKET_NAME=subly-listing-images
 # Resend — transactional email for magic links (optional; logs to stdout if unset)
 RESEND_API_KEY=re_...
 FROM_EMAIL=Subly <invites@subly.app>
-
-# Admin
-ADMIN_SECRET=dev-admin-secret-change-in-prod
-ADMIN_USER_IDS=user_clerk_id_1,user_clerk_id_2
-INVITE_SECRET=dev-invite-secret-change-in-prod
-INTERNAL_SECRET=dev-internal-secret-change-in-prod
-
-# URLs
-APP_URL=http://localhost:3000
 ```
