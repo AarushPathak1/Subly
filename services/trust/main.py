@@ -9,10 +9,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 
 import aio_pika
 import psycopg2
+from psycopg2 import pool as pg_pool
 from fastapi import FastAPI
 from openai import OpenAI
 
@@ -30,8 +32,18 @@ if _missing:
 
 openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-db_conn = psycopg2.connect(os.environ["DATABASE_URL"])
-db_conn.autocommit = True
+_db_pool = pg_pool.ThreadedConnectionPool(minconn=2, maxconn=10, dsn=os.environ["DATABASE_URL"])
+
+
+def get_db():
+    conn = _db_pool.getconn()
+    conn.autocommit = True
+    return conn
+
+
+def release_db(conn):
+    _db_pool.putconn(conn)
+
 
 # ─── Heuristic: keyword signals ──────────────────────────────────────────────
 #
@@ -68,7 +80,15 @@ SCAM_SIGNALS: dict[str, float] = {
 
 def compute_keyword_score(title: str, description: str) -> float:
     text = f"{title} {description or ''}".lower()
-    return min(1.0, sum(w for kw, w in SCAM_SIGNALS.items() if kw in text))
+    total = 0.0
+    for kw, w in SCAM_SIGNALS.items():
+        if " " in kw:
+            if kw in text:
+                total += w
+        else:
+            if re.search(rf"\b{re.escape(kw)}\b", text):
+                total += w
+    return min(1.0, total)
 
 
 # ─── Heuristic: price anomaly ─────────────────────────────────────────────────
@@ -80,14 +100,18 @@ def compute_rent_flag(listing_id: str, rent_cents: int, university: str) -> floa
     """
     if not university or not rent_cents:
         return 0.0
-    cur = db_conn.cursor()
-    cur.execute(
-        """SELECT AVG(rent_cents), COUNT(*)
-           FROM listings
-           WHERE university_near = %s AND status != 'draft' AND id != %s""",
-        (university, listing_id),
-    )
-    row = cur.fetchone()
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT AVG(rent_cents), COUNT(*)
+                   FROM listings
+                   WHERE university_near = %s AND status != 'draft' AND id != %s""",
+                (university, listing_id),
+            )
+            row = cur.fetchone()
+    finally:
+        release_db(conn)
     if not row or not row[0] or row[1] < 3:
         return 0.0
     return 1.0 if rent_cents < float(row[0]) * 0.70 else 0.0
@@ -141,58 +165,65 @@ async def compute_llm_score(
 # ─── Orchestration ────────────────────────────────────────────────────────────
 
 async def run_trust_checks(listing_id: str) -> None:
-    cur = db_conn.cursor()
-    cur.execute(
-        """SELECT title, description, rent_cents, university_near, bedrooms
-           FROM listings WHERE id = %s""",
-        (listing_id,),
-    )
-    row = cur.fetchone()
-    if not row:
-        log.warning(f"Listing {listing_id} not found, skipping")
-        return
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT title, description, rent_cents, university_near, bedrooms
+                   FROM listings WHERE id = %s""",
+                (listing_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            log.warning(f"Listing {listing_id} not found, skipping")
+            return
 
-    title, description, rent_cents, university, bedrooms = row
+        title, description, rent_cents, university, bedrooms = row
 
-    kw   = compute_keyword_score(title, description or "")
-    rf   = compute_rent_flag(listing_id, rent_cents or 0, university or "")
-    llm, reason = await compute_llm_score(
-        title, description or "", rent_cents or 0, university or "", bedrooms or 1
-    )
+        kw   = compute_keyword_score(title, description or "")
+        rf   = compute_rent_flag(listing_id, rent_cents or 0, university or "")
+        llm, reason = await compute_llm_score(
+            title, description or "", rent_cents or 0, university or "", bedrooms or 1
+        )
 
-    # LLM is the primary signal (50 %); keywords reinforce scam patterns (30 %);
-    # price anomaly is a supporting signal (20 %) — not decisive alone.
-    final = round(min(1.0, llm * 0.5 + kw * 0.3 + rf * 0.2), 3)
+        # LLM is the primary signal (50 %); keywords reinforce scam patterns (30 %);
+        # price anomaly is a supporting signal (20 %) — not decisive alone.
+        final = round(min(1.0, llm * 0.5 + kw * 0.3 + rf * 0.2), 3)
 
-    cur.execute(
-        "UPDATE listings SET scam_score = %s, status = 'active' WHERE id = %s",
-        (final, listing_id),
-    )
-    log.info(
-        f"[trust] {listing_id} → score={final:.3f} "
-        f"(llm={llm:.2f} kw={kw:.2f} rent_flag={rf:.0f}) | {reason}"
-    )
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE listings SET scam_score = %s, status = 'active' WHERE id = %s",
+                (final, listing_id),
+            )
+        log.info(
+            f"[trust] {listing_id} → score={final:.3f} "
+            f"(llm={llm:.2f} kw={kw:.2f} rent_flag={rf:.0f}) | {reason}"
+        )
+    finally:
+        release_db(conn)
 
 
 # ─── RabbitMQ consumer ────────────────────────────────────────────────────────
 
 async def consume_scam_queue() -> None:
-    try:
-        conn = await aio_pika.connect_robust(os.environ["RABBITMQ_URL"])
-        channel = await conn.channel()
-        # Limit in-flight messages so one slow LLM call doesn't starve the queue
-        await channel.set_qos(prefetch_count=4)
-        queue = await channel.declare_queue("listing.scam_check", durable=True)
-
-        async with queue.iterator() as q:
-            async for message in q:
-                async with message.process():
-                    data = json.loads(message.body)
-                    listing_id = data.get("listing_id")
-                    if listing_id:
-                        await run_trust_checks(listing_id)
-    except Exception as e:
-        log.warning(f"RabbitMQ consumer error (non-fatal): {e}")
+    while True:
+        try:
+            conn = await aio_pika.connect_robust(os.environ["RABBITMQ_URL"])
+            channel = await conn.channel()
+            await channel.set_qos(prefetch_count=4)
+            queue = await channel.declare_queue("listing.scam_check", durable=True)
+            async with queue.iterator() as q:
+                async for message in q:
+                    async with message.process():
+                        data = json.loads(message.body)
+                        listing_id = data.get("listing_id")
+                        if listing_id:
+                            await run_trust_checks(listing_id)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.error(f"RabbitMQ consumer error, retrying in 5s: {e}")
+            await asyncio.sleep(5)
 
 
 # ─── Lifespan ─────────────────────────────────────────────────────────────────

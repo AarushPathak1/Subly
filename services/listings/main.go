@@ -140,6 +140,9 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
+		if r.Header.Get("X-User-ID") != l.UserID {
+			l.ScamScore = 0
+		}
 		listings = append(listings, l)
 	}
 	writeJSON(w, http.StatusOK, listings)
@@ -203,6 +206,9 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
+	}
+	if r.Header.Get("X-User-ID") != l.UserID {
+		l.ScamScore = 0
 	}
 	writeJSON(w, http.StatusOK, l)
 }
@@ -290,9 +296,18 @@ func joinStrings(ss []string, sep string) string {
 
 func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	_, err := s.db.Exec(r.Context(), `DELETE FROM listings WHERE id=$1`, id)
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	tag, err := s.db.Exec(r.Context(), `DELETE FROM listings WHERE id=$1 AND user_id=$2`, id, userID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("listing not found or not owned by you"))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -496,6 +511,10 @@ func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("body required"))
 		return
 	}
+	if len([]rune(strings.TrimSpace(body.Body))) > 2000 {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("message body exceeds 2000 character limit"))
+		return
+	}
 	ctx := r.Context()
 
 	var renterID, listerID, listingTitle string
@@ -590,7 +609,7 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 	if _, err := s.db.Exec(ctx, `
 		UPDATE conversations
 		SET confirmed_at      = COALESCE(confirmed_at, NOW()),
-		    stripe_session_id = $2
+		    stripe_session_id = COALESCE(stripe_session_id, $2)
 		WHERE id = $1`,
 		id, body.StripeSessionID,
 	); err != nil {

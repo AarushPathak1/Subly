@@ -13,10 +13,11 @@ from typing import Optional
 
 import aio_pika
 import psycopg2
+from psycopg2 import pool as pg_pool
 from fastapi import FastAPI, HTTPException
 from openai import OpenAI
 from pinecone import Pinecone
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("matching")
@@ -34,8 +35,17 @@ openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
 index = pc.Index(os.environ.get("PINECONE_INDEX", "subly-listings"))
 
-db_conn = psycopg2.connect(os.environ["DATABASE_URL"])
-db_conn.autocommit = True
+_db_pool = pg_pool.ThreadedConnectionPool(minconn=2, maxconn=10, dsn=os.environ["DATABASE_URL"])
+
+
+def get_db():
+    conn = _db_pool.getconn()
+    conn.autocommit = True
+    return conn
+
+
+def release_db(conn):
+    _db_pool.putconn(conn)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -54,18 +64,21 @@ async def consume_new_listings():
     Listens to listings.new. Embeds each listing into Pinecone using the full
     message payload, so no extra DB round-trip is needed.
     """
-    try:
-        conn = await aio_pika.connect_robust(os.environ["RABBITMQ_URL"])
-        channel = await conn.channel()
-        queue = await channel.declare_queue("listings.new", durable=True)
-
-        async with queue.iterator() as q:
-            async for message in q:
-                async with message.process():
-                    listing = json.loads(message.body)
-                    await embed_listing_from_payload(listing)
-    except Exception as e:
-        log.warning(f"listings.new consumer error (non-fatal): {e}")
+    while True:
+        try:
+            conn = await aio_pika.connect_robust(os.environ["RABBITMQ_URL"])
+            channel = await conn.channel()
+            queue = await channel.declare_queue("listings.new", durable=True)
+            async with queue.iterator() as q:
+                async for message in q:
+                    async with message.process():
+                        listing = json.loads(message.body)
+                        await embed_listing_from_payload(listing)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.error(f"listings.new consumer error, retrying in 5s: {e}")
+            await asyncio.sleep(5)
 
 
 async def embed_listing_from_payload(listing: dict):
@@ -88,7 +101,7 @@ async def embed_listing_from_payload(listing: dict):
         title,
         description,
         f"Near {university or address}.",
-        f"{bedrooms} bed, {bathrooms} bath.",
+        f"{bedrooms or 1} bed, {bathrooms or 1.0} bath.",
         f"${rent_cents / 100:.0f}/mo.",
     ]
     if amenities:
@@ -108,53 +121,65 @@ async def embed_listing_from_payload(listing: dict):
         },
     }])
 
-    db_conn.cursor().execute(
-        "UPDATE listings SET embedding_id=%s WHERE id=%s", (listing_id, listing_id)
-    )
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE listings SET embedding_id=%s WHERE id=%s", (listing_id, listing_id)
+            )
+    finally:
+        release_db(conn)
     log.info(f"Embedded listing {listing_id} from listings.new")
 
 
 async def embed_listing(listing_id: str):
     """Fetch listing from DB and embed. Used by the scam-check pipeline and backfills."""
-    cur = db_conn.cursor()
-    cur.execute(
-        """SELECT title, description, address, university_near,
-                  rent_cents, bedrooms, bathrooms, amenities
-           FROM listings WHERE id = %s""",
-        (listing_id,),
-    )
-    row = cur.fetchone()
-    if not row:
-        log.warning(f"Listing {listing_id} not found for embedding")
-        return
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT title, description, address, university_near,
+                          rent_cents, bedrooms, bathrooms, amenities
+                   FROM listings WHERE id = %s""",
+                (listing_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            log.warning(f"Listing {listing_id} not found for embedding")
+            return
 
-    title, description, address, university, rent_cents, bedrooms, bathrooms, amenities = row
-    parts = [
-        title,
-        description or "",
-        f"Near {university or address}.",
-        f"{bedrooms} bed, {bathrooms} bath.",
-        f"${(rent_cents or 0) / 100:.0f}/mo.",
-    ]
-    if amenities:
-        parts.append("Amenities: " + ", ".join(amenities) + ".")
-    text = " ".join(p for p in parts if p)
+        title, description, address, university, rent_cents, bedrooms, bathrooms, amenities = row
+        parts = [
+            title,
+            description or "",
+            f"Near {university or address}.",
+            f"{bedrooms or 1} bed, {bathrooms or 1.0} bath.",
+            f"${(rent_cents or 0) / 100:.0f}/mo.",
+        ]
+        if amenities:
+            parts.append("Amenities: " + ", ".join(amenities) + ".")
+        text = " ".join(p for p in parts if p)
 
-    embedding = embed_text(text)
+        embedding = embed_text(text)
 
-    index.upsert(vectors=[{
-        "id": listing_id,
-        "values": embedding,
-        "metadata": {
-            "university": (university or "").upper(),
-            "rent_cents": rent_cents or 0,
-            "bedrooms":   bedrooms or 1,
-            "bathrooms":  float(bathrooms or 1),
-        },
-    }])
+        index.upsert(vectors=[{
+            "id": listing_id,
+            "values": embedding,
+            "metadata": {
+                "university": (university or "").upper(),
+                "rent_cents": rent_cents or 0,
+                "bedrooms":   bedrooms or 1,
+                "bathrooms":  float(bathrooms or 1),
+            },
+        }])
 
-    cur.execute("UPDATE listings SET embedding_id=%s WHERE id=%s", (listing_id, listing_id))
-    log.info(f"Embedded listing {listing_id}")
+        with conn.cursor() as update_cur:
+            update_cur.execute(
+                "UPDATE listings SET embedding_id=%s WHERE id=%s", (listing_id, listing_id)
+            )
+        log.info(f"Embedded listing {listing_id}")
+    finally:
+        release_db(conn)
 
 
 # ─── Lifespan ────────────────────────────────────────────────────────────────
@@ -174,7 +199,7 @@ app = FastAPI(title="Subly Matching Service", lifespan=lifespan)
 class SearchRequest(BaseModel):
     query: str
     university: Optional[str] = None
-    top_k: int = 10
+    top_k: int = Field(default=10, ge=1, le=100)
 
 
 class SearchResult(BaseModel):
@@ -206,54 +231,57 @@ def get_matches(user_id: str):
     Hard filters on university, rent, and bedrooms narrow the candidate set
     before vector similarity re-ranks it.
     """
-    cur = db_conn.cursor()
-    cur.execute(
-        """SELECT vibe_text, university, max_rent_cents, min_bedrooms
-           FROM user_profiles WHERE user_id = %s""",
-        (user_id,),
-    )
-    prefs = cur.fetchone()
-    if not prefs:
-        raise HTTPException(status_code=404, detail="User profile not found")
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT vibe_text, university, max_rent_cents, min_bedrooms
+                   FROM user_profiles WHERE user_id = %s""",
+                (user_id,),
+            )
+            prefs = cur.fetchone()
+        if not prefs:
+            raise HTTPException(status_code=404, detail="User profile not found")
 
-    vibe_text, university, max_rent_cents, min_bedrooms = prefs
+        vibe_text, university, max_rent_cents, min_bedrooms = prefs
 
-    parts = [f"Looking for a place near {university or 'campus'}."]
-    if min_bedrooms:
-        parts.append(f"{min_bedrooms}+ bedrooms.")
-    if max_rent_cents:
-        parts.append(f"Budget up to ${max_rent_cents / 100:.0f}/month.")
-    if vibe_text:
-        parts.append(vibe_text)
-    query_text = " ".join(parts)
+        parts = [f"Looking for a place near {university or 'campus'}."]
+        if min_bedrooms:
+            parts.append(f"{min_bedrooms}+ bedrooms.")
+        if max_rent_cents:
+            parts.append(f"Budget up to ${max_rent_cents / 100:.0f}/month.")
+        if vibe_text:
+            parts.append(vibe_text)
+        query_text = " ".join(parts)
 
-    embedding = embed_text(query_text)
+        embedding = embed_text(query_text)
 
-    filter_dict: dict = {}
-    if university:
-        filter_dict["university"] = {"$eq": university.upper()}
-    if max_rent_cents:
-        filter_dict["rent_cents"] = {"$lte": max_rent_cents}
-    if min_bedrooms:
-        filter_dict["bedrooms"] = {"$gte": min_bedrooms}
+        filter_dict: dict = {}
+        if university:
+            filter_dict["university"] = {"$eq": university.upper()}
+        if max_rent_cents:
+            filter_dict["rent_cents"] = {"$lte": max_rent_cents}
+        if min_bedrooms:
+            filter_dict["bedrooms"] = {"$gte": min_bedrooms}
 
-    results = index.query(
-        vector=embedding,
-        top_k=5,
-        filter=filter_dict if filter_dict else None,
-        include_metadata=True,
-    )
-
-    # Batch-fetch scam_scores from Postgres so the frontend can show risk badges.
-    listing_ids = [m["id"] for m in results["matches"]]
-    scam_scores: dict[str, float] = {}
-    if listing_ids:
-        scam_cur = db_conn.cursor()
-        scam_cur.execute(
-            "SELECT id::text, scam_score FROM listings WHERE id = ANY(%s)",
-            (listing_ids,),
+        results = index.query(
+            vector=embedding,
+            top_k=5,
+            filter=filter_dict if filter_dict else None,
+            include_metadata=True,
         )
-        scam_scores = {row[0]: float(row[1]) for row in scam_cur.fetchall()}
+
+        listing_ids = [m["id"] for m in results["matches"]]
+        scam_scores: dict[str, float] = {}
+        if listing_ids:
+            with conn.cursor() as scam_cur:
+                scam_cur.execute(
+                    "SELECT id::text, scam_score FROM listings WHERE id = ANY(%s)",
+                    (listing_ids,),
+                )
+                scam_scores = {row[0]: float(row[1]) for row in scam_cur.fetchall()}
+    finally:
+        release_db(conn)
 
     return [
         MatchResult(

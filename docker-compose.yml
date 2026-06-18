@@ -17,7 +17,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-subly}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-subly_secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-subly}
     ports:
       - "5434:5432"
@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-subly}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-subly_secret}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:?RABBITMQ_PASS is required}
     ports:
       - "5672:5672"    # AMQP
     volumes:
@@ -68,7 +68,7 @@ services:
       LISTINGS_SERVICE_URL: "http://listings:3002"
       MATCHING_SERVICE_URL: "http://matching:3003"
       ENV: ${ENV:-development}
-      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret-change-in-prod}
+      INTERNAL_SECRET: ${INTERNAL_SECRET:?INTERNAL_SECRET is required}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
     depends_on:
       - auth
@@ -91,12 +91,12 @@ services:
       PORT: "3001"
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
       CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY}
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-subly}:${POSTGRES_PASSWORD:-subly_secret}@postgres:5432/${POSTGRES_DB:-subly}"
-      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-subly}:${RABBITMQ_PASS:-subly_secret}@rabbitmq:5672"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-subly}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-subly}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-subly}:${RABBITMQ_PASS}@rabbitmq:5672"
       NODE_ENV: ${ENV:-development}
-      INVITE_SECRET: ${INVITE_SECRET:-dev-invite-secret-change-in-prod}
+      INVITE_SECRET: ${INVITE_SECRET:?INVITE_SECRET is required}
       APP_URL: ${APP_URL:-http://localhost:3000}
-      ADMIN_SECRET: ${ADMIN_SECRET:-dev-admin-secret-change-in-prod}
+      ADMIN_SECRET: ${ADMIN_SECRET:?ADMIN_SECRET is required}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       FROM_EMAIL: ${FROM_EMAIL:-Subly <invites@subly.app>}
     depends_on:
@@ -119,8 +119,8 @@ services:
       - "3002:3002"
     environment:
       PORT: "3002"
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-subly}:${POSTGRES_PASSWORD:-subly_secret}@postgres:5432/${POSTGRES_DB:-subly}"
-      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-subly}:${RABBITMQ_PASS:-subly_secret}@rabbitmq:5672"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-subly}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-subly}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-subly}:${RABBITMQ_PASS}@rabbitmq:5672"
       AUTH_SERVICE_URL: "http://auth:3001"
       ENV: ${ENV:-development}
     depends_on:
@@ -143,8 +143,8 @@ services:
       - "3003:3003"
     environment:
       PORT: "3003"
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-subly}:${POSTGRES_PASSWORD:-subly_secret}@postgres:5432/${POSTGRES_DB:-subly}"
-      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-subly}:${RABBITMQ_PASS:-subly_secret}@rabbitmq:5672"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-subly}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-subly}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-subly}:${RABBITMQ_PASS}@rabbitmq:5672"
       PINECONE_API_KEY: ${PINECONE_API_KEY}
       PINECONE_INDEX: ${PINECONE_INDEX:-subly-listings}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -167,8 +167,8 @@ services:
       - "3004:3004"
     environment:
       PORT: "3004"
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-subly}:${POSTGRES_PASSWORD:-subly_secret}@postgres:5432/${POSTGRES_DB:-subly}"
-      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-subly}:${RABBITMQ_PASS:-subly_secret}@rabbitmq:5672"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-subly}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-subly}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-subly}:${RABBITMQ_PASS}@rabbitmq:5672"
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ENV: ${ENV:-development}
     depends_on:
@@ -198,12 +198,11 @@ services:
       NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: /dashboard
       NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: /dashboard
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
-      ADMIN_SECRET: ${ADMIN_SECRET:-dev-admin-secret-change-in-prod}
+      ADMIN_SECRET: ${ADMIN_SECRET:?ADMIN_SECRET is required}
       APP_URL: ${APP_URL:-http://localhost:3000}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
-      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret-change-in-prod}
     depends_on:
       - gateway
     networks:

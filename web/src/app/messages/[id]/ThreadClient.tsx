@@ -48,7 +48,7 @@ export function ThreadClient({
       const updated = await fetchMessages(conversationId);
       if (updated.length > 0) setMessages(updated);
     };
-    const id = setInterval(poll, 5000);
+    const id = setInterval(poll, 30000);
     return () => clearInterval(id);
   }, [conversationId]);
 
