@@ -1,5 +1,6 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
 import { useEffect } from "react";
 import Link from "next/link";
 import { SublyLogo } from "@/components/SublyLogo";
@@ -13,6 +14,7 @@ export default function DashboardError({
 }) {
   useEffect(() => {
     console.error("[dashboard] error:", error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (

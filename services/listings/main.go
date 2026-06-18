@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -12,7 +11,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/subly/listings/logger"
 )
+
+var log = logger.New(logger.ConfigFromEnv("listings"))
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -125,7 +128,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 	defer rows.Close()
@@ -137,7 +140,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 			&l.UniversityNear, &l.RentCents, &l.AvailableFrom, &l.AvailableTo,
 			&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
 			&l.Status, &l.ScamScore, &l.CreatedAt, &l.UpdatedAt); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
+			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
 		if r.Header.Get("X-User-ID") != l.UserID {
@@ -151,13 +154,13 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
 		return
 	}
 
 	var body Listing
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeErr(w, r, http.StatusBadRequest, err)
 		return
 	}
 
@@ -179,7 +182,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		body.Bedrooms, body.Bathrooms, body.Amenities, body.Images,
 	).Scan(&id)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -204,7 +207,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 		&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
 		&l.Status, &l.ScamScore, &l.CreatedAt, &l.UpdatedAt)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
+		writeErr(w, r, http.StatusNotFound, err)
 		return
 	}
 	if r.Header.Get("X-User-ID") != l.UserID {
@@ -232,7 +235,7 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		Status         *string  `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeErr(w, r, http.StatusBadRequest, err)
 		return
 	}
 
@@ -273,11 +276,11 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	tag, err := s.db.Exec(r.Context(), q, args...)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("listing not found or not owned by you"))
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("listing not found or not owned by you"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": id})
@@ -298,16 +301,16 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
 		return
 	}
 	tag, err := s.db.Exec(r.Context(), `DELETE FROM listings WHERE id=$1 AND user_id=$2`, id, userID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("listing not found or not owned by you"))
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("listing not found or not owned by you"))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -318,14 +321,14 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
 		return
 	}
 	var body struct {
 		ListingID string `json:"listing_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ListingID == "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("listing_id required"))
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("listing_id required"))
 		return
 	}
 	ctx := r.Context()
@@ -334,11 +337,11 @@ func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	var rentCents int
 	err := s.db.QueryRow(ctx, `SELECT user_id, rent_cents FROM listings WHERE id = $1`, body.ListingID).Scan(&listerID, &rentCents)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("listing not found"))
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("listing not found"))
 		return
 	}
 	if listerID == userID {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cannot message your own listing"))
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("cannot message your own listing"))
 		return
 	}
 
@@ -352,7 +355,7 @@ func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 		body.ListingID, userID, listerID, rentCents,
 	).Scan(&convID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": convID})
@@ -361,7 +364,7 @@ func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 func (s *server) handleListConversations(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
 		return
 	}
 	rows, err := s.db.Query(r.Context(), `
@@ -392,7 +395,7 @@ func (s *server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		ORDER BY COALESCE(c.last_message_at, c.created_at) DESC`,
 		userID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 	defer rows.Close()
@@ -404,7 +407,7 @@ func (s *server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		if err := rows.Scan(&c.ID, &c.ListingID, &c.ListingTitle,
 			&c.RenterID, &c.ListerID, &c.OtherEmail,
 			&lastMsgAt, &c.CreatedAt, &c.LastMessage, &c.UnreadCount); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
+			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
 		c.LastMessageAt = lastMsgAt
@@ -417,7 +420,7 @@ func (s *server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
 		return
 	}
 	var c Conversation
@@ -440,7 +443,7 @@ func (s *server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		&lastMsgAt, &c.CreatedAt, &c.LastMessage, &c.UnreadCount,
 		&c.InitialRentCents, &confirmedAt)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}
 	c.LastMessageAt = lastMsgAt
@@ -452,7 +455,7 @@ func (s *server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
 		return
 	}
 	ctx := r.Context()
@@ -461,11 +464,11 @@ func (s *server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	var renterID, listerID string
 	err := s.db.QueryRow(ctx, `SELECT renter_id, lister_id FROM conversations WHERE id = $1`, id).Scan(&renterID, &listerID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}
 	if renterID != userID && listerID != userID {
-		writeErr(w, http.StatusForbidden, fmt.Errorf("access denied"))
+		writeErr(w, r, http.StatusForbidden, fmt.Errorf("access denied"))
 		return
 	}
 
@@ -480,7 +483,7 @@ func (s *server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		 FROM messages WHERE conversation_id = $1
 		 ORDER BY created_at ASC LIMIT 100`, id)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 	defer rows.Close()
@@ -489,7 +492,7 @@ func (s *server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m Message
 		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Body, &m.CreatedAt); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
+			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
 		msgs = append(msgs, m)
@@ -501,18 +504,18 @@ func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
 		return
 	}
 	var body struct {
 		Body string `json:"body"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Body) == "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("body required"))
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("body required"))
 		return
 	}
 	if len([]rune(strings.TrimSpace(body.Body))) > 2000 {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("message body exceeds 2000 character limit"))
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("message body exceeds 2000 character limit"))
 		return
 	}
 	ctx := r.Context()
@@ -524,17 +527,17 @@ func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		JOIN listings l ON l.id = c.listing_id
 		WHERE c.id = $1`, id).Scan(&renterID, &listerID, &listingTitle)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}
 	if renterID != userID && listerID != userID {
-		writeErr(w, http.StatusForbidden, fmt.Errorf("access denied"))
+		writeErr(w, r, http.StatusForbidden, fmt.Errorf("access denied"))
 		return
 	}
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 	defer tx.Rollback(ctx)
@@ -546,17 +549,17 @@ func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		id, userID, strings.TrimSpace(body.Body),
 	).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Body, &msg.CreatedAt)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 
 	if _, err := tx.Exec(ctx, `UPDATE conversations SET last_message_at = NOW() WHERE id = $1`, id); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -579,14 +582,14 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 	userID := r.Header.Get("X-User-ID")
 	isInternal := r.Header.Get("X-Internal-Call") == "true"
 	if userID == "" && !isInternal {
-		writeErr(w, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
 		return
 	}
 	var body struct {
 		StripeSessionID string `json:"stripe_session_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid body"))
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("invalid body"))
 		return
 	}
 	ctx := r.Context()
@@ -597,11 +600,11 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 		FROM conversations c
 		JOIN listings l ON l.id = c.listing_id
 		WHERE c.id = $1`, id).Scan(&listerID, &renterID, &listingTitle); err != nil {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}
 	if !isInternal && listerID != userID {
-		writeErr(w, http.StatusForbidden, fmt.Errorf("only the lister can confirm a match"))
+		writeErr(w, r, http.StatusForbidden, fmt.Errorf("only the lister can confirm a match"))
 		return
 	}
 
@@ -613,7 +616,7 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 		WHERE id = $1`,
 		id, body.StripeSessionID,
 	); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -642,7 +645,7 @@ func (s *server) handleGetUserProfile(w http.ResponseWriter, r *http.Request) {
 		WHERE u.id = $1 AND u.edu_verified = true`, id,
 	).Scan(&p.ID, &p.University, &p.VibeText, &p.MemberSince)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("user not found"))
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("user not found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
@@ -659,7 +662,7 @@ func (s *server) startExpirationWorker() {
 			  AND available_to < CURRENT_DATE
 			RETURNING id, user_id, title`)
 		if err != nil {
-			log.Printf("[listings] expiration worker: %v", err)
+			log.Error("expiration worker failed", "error", err)
 			return
 		}
 		defer rows.Close()
@@ -695,7 +698,7 @@ func (s *server) publishNotification(queue string, payload interface{}) {
 		DeliveryMode: amqp.Persistent,
 		Body:         data,
 	}); err != nil {
-		log.Printf("[listings] failed to publish to %s: %v", queue, err)
+		log.Error("failed to publish notification", "queue", queue, "error", err)
 	}
 }
 
@@ -710,7 +713,7 @@ func (s *server) publishScamCheck(listingID string) {
 		Body:         payload,
 	})
 	if err != nil {
-		log.Printf("[listings] failed to publish scam check: %v", err)
+		log.Error("failed to publish scam check", "error", err)
 	}
 }
 
@@ -725,7 +728,7 @@ func (s *server) publishNewListing(l Listing) {
 		Body:         payload,
 	})
 	if err != nil {
-		log.Printf("[listings] failed to publish new listing: %v", err)
+		log.Error("failed to publish new listing", "error", err)
 	}
 }
 
@@ -737,8 +740,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func writeErr(w http.ResponseWriter, status int, err error) {
-	log.Printf("[listings] error: %v", err)
+func writeErr(w http.ResponseWriter, r *http.Request, status int, err error) {
+	log.Error("handler error", "status", status, "request_id", logger.RequestIDFrom(r.Context()), "error", err)
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
@@ -751,14 +754,14 @@ func main() {
 
 	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
-		log.Fatalf("[listings] db connect: %v", err)
+		log.Fatal("db connect failed", "error", err)
 	}
 	defer db.Close()
 
 	var mqCh *amqp.Channel
 	mqConn, err := amqp.Dial(os.Getenv("RABBITMQ_URL"))
 	if err != nil {
-		log.Fatalf("[listings] rabbitmq connect: %v", err)
+		log.Fatal("rabbitmq connect failed", "error", err)
 	} else {
 		mqCh, _ = mqConn.Channel()
 		mqCh.QueueDeclare("listing.scam_check", true, false, false, false, nil)
@@ -776,12 +779,14 @@ func main() {
 	port := envOr("PORT", "3002")
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      s.routes(),
+		Handler:      requestIDMiddleware(recoverMiddleware(log, accessLogMiddleware(log, s.routes()))),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
-	log.Printf("[listings] listening on :%s", port)
-	log.Fatal(srv.ListenAndServe())
+	log.Info("listening", "port", port)
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatal("fatal", "error", err)
+	}
 }
 
 func envOr(key, fallback string) string {
@@ -799,6 +804,6 @@ func requireEnv(keys ...string) {
 		}
 	}
 	if len(missing) > 0 {
-		log.Fatalf("[listings] missing required env vars: %s", strings.Join(missing, ", "))
+		log.Fatal("missing required env vars", "vars", strings.Join(missing, ", "))
 	}
 }

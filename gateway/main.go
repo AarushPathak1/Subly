@@ -2,13 +2,14 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/subly/gateway/logger"
 )
 
 // route maps a path prefix to an upstream service URL.
@@ -17,29 +18,21 @@ type route struct {
 	upstream *url.URL
 }
 
-func mustParseURL(raw string) *url.URL {
+func mustParseURL(log *logger.Logger, raw string) *url.URL {
 	u, err := url.Parse(raw)
 	if err != nil {
-		log.Fatalf("invalid upstream URL %q: %v", raw, err)
+		log.Fatal("invalid upstream URL", "url", raw, "error", err)
 	}
 	return u
 }
 
-func newReverseProxy(target *url.URL) http.Handler {
+func newReverseProxy(log *logger.Logger, target *url.URL) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Printf("[gateway] upstream error for %s: %v", r.URL.Path, err)
+		log.Error("upstream error", "path", r.URL.Path, "request_id", logger.RequestIDFrom(r.Context()), "error", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 	}
 	return proxy
-}
-
-func loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		log.Printf("[gateway] %s %s — %v", r.Method, r.URL.Path, time.Since(start))
-	})
 }
 
 // authMiddleware validates the Clerk session via the auth service and injects X-User-ID.
@@ -105,19 +98,21 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func main() {
-	authURL := mustParseURL(envOr("AUTH_SERVICE_URL", "http://auth:3001"))
-	listingsURL := mustParseURL(envOr("LISTINGS_SERVICE_URL", "http://listings:3002"))
-	matchingURL := mustParseURL(envOr("MATCHING_SERVICE_URL", "http://matching:3003"))
+	log := logger.New(logger.ConfigFromEnv("gateway"))
+
+	authURL := mustParseURL(log, envOr("AUTH_SERVICE_URL", "http://auth:3001"))
+	listingsURL := mustParseURL(log, envOr("LISTINGS_SERVICE_URL", "http://listings:3002"))
+	matchingURL := mustParseURL(log, envOr("MATCHING_SERVICE_URL", "http://matching:3003"))
 	internalSecret := os.Getenv("INTERNAL_SECRET")
 
 	if internalSecret == "" {
-		log.Fatal("[gateway] INTERNAL_SECRET must be set")
+		log.Fatal("INTERNAL_SECRET must be set")
 	}
 	if internalSecret == "dev-internal-secret-change-in-prod" {
-		log.Println("[gateway] WARNING: INTERNAL_SECRET is the default dev value — change it before going to production")
+		log.Warn("INTERNAL_SECRET is the default dev value — change it before going to production")
 	}
 	if os.Getenv("ALLOWED_ORIGINS") == "" {
-		log.Println("[gateway] WARNING: ALLOWED_ORIGINS not set — CORS will allow all origins")
+		log.Warn("ALLOWED_ORIGINS not set — CORS will allow all origins")
 	}
 
 	routes := []route{
@@ -136,7 +131,7 @@ func main() {
 
 	for _, rt := range routes {
 		prefix := rt.prefix
-		proxy := newReverseProxy(rt.upstream)
+		proxy := newReverseProxy(log, rt.upstream)
 		var h http.Handler = http.StripPrefix(prefix, proxy)
 		if prefix == "/api/listings" || prefix == "/api/messages" {
 			h = authMiddleware(authURL.String(), internalSecret, h)
@@ -147,15 +142,15 @@ func main() {
 	port := envOr("PORT", "8080")
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      loggingMiddleware(corsMiddleware(mux)),
+		Handler:      requestIDMiddleware(recoverMiddleware(log, accessLogMiddleware(log, corsMiddleware(mux)))),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Printf("[gateway] listening on :%s", port)
+	log.Info("listening", "port", port)
 	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("[gateway] fatal: %v", err)
+		log.Fatal("fatal", "error", err)
 	}
 }
 

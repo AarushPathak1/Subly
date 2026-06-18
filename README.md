@@ -449,4 +449,19 @@ S3_BUCKET_NAME=subly-listing-images
 # Resend — transactional email for magic links (optional; logs to stdout if unset)
 RESEND_API_KEY=re_...
 FROM_EMAIL=Subly <invites@subly.app>
+
+# Sentry — error tracking (optional; services no-op if DSN unset)
+SENTRY_DSN=
+NEXT_PUBLIC_SENTRY_DSN=
+SENTRY_ENVIRONMENT=development
+NEXT_PUBLIC_SENTRY_ENVIRONMENT=development
+SENTRY_ORG=
+SENTRY_PROJECT=
+SENTRY_AUTH_TOKEN=
+
+# Structured logging — gateway and listings Go services (optional; defaults shown)
+LOG_LEVEL=info
+LOG_FORMAT=json
 ```
+
+The web app uses `@sentry/nextjs` for client, server, and edge error tracking; it stays fully inert (no init, no network calls) until `SENTRY_DSN`/`NEXT_PUBLIC_SENTRY_DSN` is set, and source-map upload during build only runs if `SENTRY_AUTH_TOKEN` is also present. The gateway and listings services emit structured JSON logs (`LOG_LEVEL`/`LOG_FORMAT`) with per-request `X-Request-ID` correlation and panic recovery instead of crashing the process.
