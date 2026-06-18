@@ -79,9 +79,13 @@ class TestMatchesEndpoint:
         """
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None  # no profile
-        matching_main.db_conn.cursor.return_value = mock_cursor
 
-        resp = client.get("/matches/user-no-profile")
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        mock_conn.cursor.return_value.__exit__.return_value = False
+
+        with patch.object(matching_main, "get_db", return_value=mock_conn):
+            resp = client.get("/matches/user-no-profile")
         assert resp.status_code == 404
 
     def test_matches_returns_list_for_known_user(self):
@@ -90,15 +94,22 @@ class TestMatchesEndpoint:
         """
         fake_embedding = [0.5] * 1536
 
-        def cursor_side_effect():
-            c = MagicMock()
-            # First call: user profile
-            c.fetchone.return_value = ("quiet place near campus", "UT AUSTIN", 150000, 2)
-            # Second call: scam scores
-            c.fetchall.return_value = [("listing-xyz", 0.1)]
-            return c
+        profile_cursor = MagicMock()
+        profile_cursor.fetchone.return_value = ("quiet place near campus", "UT AUSTIN", 150000, 2)
 
-        matching_main.db_conn.cursor.side_effect = cursor_side_effect
+        scam_cursor = MagicMock()
+        scam_cursor.fetchall.return_value = [("listing-xyz", 0.1)]
+
+        cm_profile = MagicMock()
+        cm_profile.__enter__.return_value = profile_cursor
+        cm_profile.__exit__.return_value = False
+
+        cm_scam = MagicMock()
+        cm_scam.__enter__.return_value = scam_cursor
+        cm_scam.__exit__.return_value = False
+
+        mock_conn = MagicMock()
+        mock_conn.cursor.side_effect = [cm_profile, cm_scam]
 
         pinecone_results = {
             "matches": [
@@ -110,10 +121,11 @@ class TestMatchesEndpoint:
             ]
         }
 
-        with patch.object(matching_main, "embed_text", return_value=fake_embedding):
-            with patch.object(matching_main, "index") as mock_idx:
-                mock_idx.query.return_value = pinecone_results
-                resp = client.get("/matches/user-with-profile")
+        with patch.object(matching_main, "get_db", return_value=mock_conn):
+            with patch.object(matching_main, "embed_text", return_value=fake_embedding):
+                with patch.object(matching_main, "index") as mock_idx:
+                    mock_idx.query.return_value = pinecone_results
+                    resp = client.get("/matches/user-with-profile")
 
         assert resp.status_code == 200
         results = resp.json()

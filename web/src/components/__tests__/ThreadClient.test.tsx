@@ -156,11 +156,11 @@ describe("message input", () => {
 // ── Polling ───────────────────────────────────────────────────────────────────
 
 describe("polling", () => {
-  it("polls for new messages every 5 seconds", async () => {
+  it("polls for new messages every 30 seconds", async () => {
     render(<ThreadClient {...defaultProps} />);
     // Initial mount doesn't count as a poll call
     const callsBefore = mockFetchMessages.mock.calls.length;
-    await act(async () => { vi.advanceTimersByTime(5000); });
+    await act(async () => { vi.advanceTimersByTime(30000); });
     expect(mockFetchMessages.mock.calls.length).toBeGreaterThan(callsBefore);
   });
 });
