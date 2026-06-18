@@ -1,6 +1,7 @@
 import { requireEduVerified } from "@/lib/auth";
 import { verifyAndConfirmMatch, fetchConversation } from "@/lib/actions";
 import { AppNav } from "@/components/AppNav";
+import { CaptureMatchConfirmed } from "./CaptureMatchConfirmed";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -44,6 +45,10 @@ export default async function ConfirmedPage({
           </>
         ) : (
           <>
+            <CaptureMatchConfirmed
+              conversationId={params.id}
+              listingTitleKnown={!!conversation?.listing_title}
+            />
             <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mb-6">
               <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
                 <circle cx="14" cy="14" r="12" fill="#d1fae5" stroke="#059669" strokeWidth="1.5"/>

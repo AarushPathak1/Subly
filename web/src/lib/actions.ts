@@ -12,6 +12,7 @@ import {
   ListingSchema,
   InviteRequestSchema,
 } from "@/lib/schemas";
+import { getSessionUser } from "@/lib/auth";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -235,6 +236,8 @@ export async function createCheckoutSession(
   const conv = await fetchConversation(conversationId);
   if (!conv) return { error: "Conversation not found" };
 
+  const user = await getSessionUser();
+
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const fee = calculateMatchFee(conv.initial_rent_cents);
 
@@ -256,7 +259,7 @@ export async function createCheckoutSession(
     ],
     success_url: `${appUrl}/messages/${conversationId}/confirmed?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${appUrl}/messages/${conversationId}`,
-    metadata: { conversation_id: conversationId },
+    metadata: { conversation_id: conversationId, ...(user?.id ? { user_id: user.id } : {}) },
   });
 
   return { url: session.url! };

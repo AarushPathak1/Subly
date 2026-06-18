@@ -1,5 +1,8 @@
 import Stripe from "stripe";
 import { NextRequest, NextResponse } from "next/server";
+import { captureServer } from "@/lib/posthog/server";
+
+export const runtime = "nodejs";
 
 const GATEWAY = process.env.GATEWAY_URL ?? "http://localhost:8080";
 
@@ -40,6 +43,24 @@ export async function POST(req: NextRequest) {
         }
       } catch (err) {
         console.error(`[webhook] confirm fetch threw for conversation ${conversationId}:`, err);
+      }
+
+      // NOTE: no idempotency dedup — Stripe retries of this webhook will fire
+      // a duplicate payment_completed event. Acceptable per spec; analytics
+      // must never block or affect the webhook response.
+      try {
+        await captureServer({
+          distinctId: session.client_reference_id ?? session.metadata?.user_id ?? `conversation:${conversationId}`,
+          event: "payment_completed",
+          properties: {
+            conversation_id: conversationId,
+            amount_cents: session.amount_total ?? 0,
+            currency: session.currency ?? "usd",
+            stripe_session_id: session.id,
+          },
+        });
+      } catch {
+        // swallow — analytics must never affect webhook response
       }
     }
   }
