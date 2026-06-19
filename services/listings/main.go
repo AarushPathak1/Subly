@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 
@@ -608,26 +610,35 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Idempotent: preserve existing confirmed_at if already set
-	if _, err := s.db.Exec(ctx, `
+	// Atomically confirm only if not already confirmed, so retried calls (e.g.
+	// Stripe webhook redeliveries) don't re-publish the notification.
+	var newlyConfirmed bool
+	err := s.db.QueryRow(ctx, `
 		UPDATE conversations
-		SET confirmed_at      = COALESCE(confirmed_at, NOW()),
+		SET confirmed_at      = NOW(),
 		    stripe_session_id = COALESCE(stripe_session_id, $2)
-		WHERE id = $1`,
+		WHERE id = $1 AND confirmed_at IS NULL
+		RETURNING true`,
 		id, body.StripeSessionID,
-	); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
-		return
+	).Scan(&newlyConfirmed)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			writeErr(w, r, http.StatusInternalServerError, err)
+			return
+		}
+		newlyConfirmed = false // already confirmed; idempotent no-op
 	}
 
-	s.publishNotification("notifications.match_confirmed", map[string]interface{}{
-		"lister_id":       listerID,
-		"renter_id":       renterID,
-		"listing_title":   listingTitle,
-		"conversation_id": id,
-	})
+	if newlyConfirmed {
+		s.publishNotification("notifications.match_confirmed", map[string]interface{}{
+			"lister_id":       listerID,
+			"renter_id":       renterID,
+			"listing_title":   listingTitle,
+			"conversation_id": id,
+		})
+	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "confirmed"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "confirmed", "newly_confirmed": newlyConfirmed})
 }
 
 // ─── User profile handler ────────────────────────────────────────────────────

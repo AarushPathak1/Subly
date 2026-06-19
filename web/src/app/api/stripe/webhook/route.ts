@@ -29,6 +29,10 @@ export async function POST(req: NextRequest) {
     if (conversationId && session.payment_status === "paid") {
       // Best-effort backup confirmation — primary path is the success page.
       // Uses an internal service header to bypass user auth on the listings service.
+      // The confirm endpoint is idempotent and reports whether this call was the
+      // one that newly confirmed the conversation, so Stripe webhook redeliveries
+      // don't re-fire payment_completed.
+      let newlyConfirmed = false;
       try {
         const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/confirm`, {
           method: "POST",
@@ -40,27 +44,29 @@ export async function POST(req: NextRequest) {
         });
         if (!res.ok) {
           console.error(`[webhook] confirm failed for conversation ${conversationId}: HTTP ${res.status}`);
+        } else {
+          const data = (await res.json()) as { newly_confirmed?: boolean };
+          newlyConfirmed = data.newly_confirmed === true;
         }
       } catch (err) {
         console.error(`[webhook] confirm fetch threw for conversation ${conversationId}:`, err);
       }
 
-      // NOTE: no idempotency dedup — Stripe retries of this webhook will fire
-      // a duplicate payment_completed event. Acceptable per spec; analytics
-      // must never block or affect the webhook response.
-      try {
-        await captureServer({
-          distinctId: session.client_reference_id ?? session.metadata?.user_id ?? `conversation:${conversationId}`,
-          event: "payment_completed",
-          properties: {
-            conversation_id: conversationId,
-            amount_cents: session.amount_total ?? 0,
-            currency: session.currency ?? "usd",
-            stripe_session_id: session.id,
-          },
-        });
-      } catch {
-        // swallow — analytics must never affect webhook response
+      if (newlyConfirmed) {
+        try {
+          await captureServer({
+            distinctId: session.client_reference_id ?? session.metadata?.user_id ?? `conversation:${conversationId}`,
+            event: "payment_completed",
+            properties: {
+              conversation_id: conversationId,
+              amount_cents: session.amount_total ?? 0,
+              currency: session.currency ?? "usd",
+              stripe_session_id: session.id,
+            },
+          });
+        } catch {
+          // swallow — analytics must never affect webhook response
+        }
       }
     }
   }
