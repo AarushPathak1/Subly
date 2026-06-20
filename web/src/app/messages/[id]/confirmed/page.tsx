@@ -1,7 +1,8 @@
 import { requireEduVerified } from "@/lib/auth";
-import { verifyAndConfirmMatch, fetchConversation } from "@/lib/actions";
+import { verifyAndConfirmMatch, fetchConversation, fetchReviewEligibility } from "@/lib/actions";
 import { AppNav } from "@/components/AppNav";
 import { CaptureMatchConfirmed } from "./CaptureMatchConfirmed";
+import { ReviewForm } from "./ReviewForm";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -23,6 +24,8 @@ export default async function ConfirmedPage({
   ]);
 
   const failed = !!result.error && result.error !== "Failed to confirm match";
+
+  const eligibility = !failed ? await fetchReviewEligibility(params.id) : null;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -77,6 +80,11 @@ export default async function ConfirmedPage({
                 All messages
               </Link>
             </div>
+
+            {eligibility?.eligible && <ReviewForm conversationId={params.id} />}
+            {eligibility?.already_reviewed && (
+              <p className="mt-8 text-sm text-slate-500">Thanks for your review</p>
+            )}
           </>
         )}
       </div>

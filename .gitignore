@@ -11,8 +11,6 @@ dist/
 # Go
 */vendor/
 **/*.test
-/gateway/gateway
-/services/listings/listings
 
 # Python
 __pycache__/

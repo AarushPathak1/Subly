@@ -18,6 +18,27 @@ type route struct {
 	upstream *url.URL
 }
 
+// buildRoutes returns the gateway's path-prefix -> upstream routing table.
+// Extracted from main() so tests can exercise the exact production route
+// list (rather than a hand-copied mirror that could silently drift).
+func buildRoutes(authURL, listingsURL, matchingURL *url.URL) []route {
+	return []route{
+		{prefix: "/api/auth", upstream: authURL},
+		{prefix: "/api/public", upstream: listingsURL},
+		{prefix: "/api/listings", upstream: listingsURL},
+		{prefix: "/api/messages", upstream: listingsURL},
+		{prefix: "/api/matching", upstream: matchingURL},
+	}
+}
+
+// requiresAuth reports whether requests under the given route prefix must
+// pass through authMiddleware before reaching the upstream. /api/public is
+// deliberately excluded — it backs unauthenticated landing-page data
+// (GET /public/reviews, GET /public/stats).
+func requiresAuth(prefix string) bool {
+	return prefix == "/api/listings" || prefix == "/api/messages"
+}
+
 func mustParseURL(log *logger.Logger, raw string) *url.URL {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -115,12 +136,7 @@ func main() {
 		log.Warn("ALLOWED_ORIGINS not set — CORS will allow all origins")
 	}
 
-	routes := []route{
-		{prefix: "/api/auth", upstream: authURL},
-		{prefix: "/api/listings", upstream: listingsURL},
-		{prefix: "/api/messages", upstream: listingsURL},
-		{prefix: "/api/matching", upstream: matchingURL},
-	}
+	routes := buildRoutes(authURL, listingsURL, matchingURL)
 
 	mux := http.NewServeMux()
 
@@ -133,7 +149,7 @@ func main() {
 		prefix := rt.prefix
 		proxy := newReverseProxy(log, rt.upstream)
 		var h http.Handler = http.StripPrefix(prefix, proxy)
-		if prefix == "/api/listings" || prefix == "/api/messages" {
+		if requiresAuth(prefix) {
 			h = authMiddleware(authURL.String(), internalSecret, h)
 		}
 		mux.Handle(prefix+"/", h)

@@ -36,6 +36,10 @@ import {
   sendMessage,
   createCheckoutSession,
   verifyAndConfirmMatch,
+  submitReview,
+  fetchReviewEligibility,
+  fetchPublicReviews,
+  fetchPublicStats,
 } from "@/lib/actions";
 
 // ── calculateMatchFee ─────────────────────────────────────────────────────────
@@ -277,5 +281,161 @@ describe("verifyAndConfirmMatch", () => {
     await verifyAndConfirmMatch("conv-1", "sess_123");
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.stripe_session_id).toBe("sess_123");
+  });
+});
+
+// ── submitReview ──────────────────────────────────────────────────────────────
+
+function reviewFormData(rating: string | null, body?: string) {
+  const fd = new FormData();
+  if (rating !== null) fd.set("rating", rating);
+  if (body !== undefined) fd.set("body", body);
+  return fd;
+}
+
+describe("submitReview", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("returns toast on success", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 201 });
+    const result = await submitReview("conv-1", null, reviewFormData("5", "Great match!"));
+    expect(result).toEqual({ toast: "Thanks for your review!" });
+  });
+
+  it("sends conversation_id, rating (as number), and body as JSON", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 201 });
+    await submitReview("conv-1", null, reviewFormData("4", "Pretty good"));
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/listings/reviews"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ conversation_id: "conv-1", rating: 4, body: "Pretty good" }),
+      })
+    );
+  });
+
+  it("rejects an out-of-range rating before hitting the network", async () => {
+    const result = await submitReview("conv-1", null, reviewFormData("7", "x"));
+    expect(result).toEqual({ error: "Please select a rating" });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing rating before hitting the network", async () => {
+    // Zod's built-in "required" check fires before the custom .refine() message
+    // when the key is absent from the FormData entirely.
+    const result = await submitReview("conv-1", null, reviewFormData(null));
+    expect(result).toEqual({ error: "Required" });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a body over 1000 characters before hitting the network", async () => {
+    const result = await submitReview("conv-1", null, reviewFormData("5", "a".repeat(1001)));
+    expect(result).toEqual({ error: "Keep it under 1000 characters" });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("maps 409 to an already-reviewed error", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 409 });
+    const result = await submitReview("conv-1", null, reviewFormData("5"));
+    expect(result).toEqual({ error: "You've already reviewed this match." });
+  });
+
+  it("maps 422 to a not-confirmed error", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 422 });
+    const result = await submitReview("conv-1", null, reviewFormData("5"));
+    expect(result).toEqual({ error: "This match hasn't been confirmed yet." });
+  });
+
+  it("maps other failure statuses to a generic error", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+    const result = await submitReview("conv-1", null, reviewFormData("5"));
+    expect(result).toEqual({ error: "Failed to submit review. Please try again." });
+  });
+});
+
+// ── fetchReviewEligibility ────────────────────────────────────────────────────
+
+describe("fetchReviewEligibility", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("returns eligibility payload on 200", async () => {
+    const payload = { eligible: true, already_reviewed: false };
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => payload });
+    expect(await fetchReviewEligibility("conv-1")).toEqual(payload);
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/listings/reviews/eligibility?conversation_id=conv-1"),
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer mock-token" }),
+        cache: "no-store",
+      })
+    );
+  });
+
+  it("returns null when the API responds with an error", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false });
+    expect(await fetchReviewEligibility("conv-1")).toBeNull();
+  });
+
+  it("returns null when fetch rejects", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await fetchReviewEligibility("conv-1")).toBeNull();
+  });
+});
+
+// ── fetchPublicReviews ────────────────────────────────────────────────────────
+
+describe("fetchPublicReviews", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("returns reviews array on 200", async () => {
+    const reviews = [{ id: "r1", rating: 5, body: "Great!", created_at: "2026-01-01", reviewer_display_name: "A.", reviewer_university: "UCLA", listing_title: "Loft" }];
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => reviews });
+    expect(await fetchPublicReviews()).toEqual(reviews);
+  });
+
+  it("does not send an Authorization header (public endpoint)", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
+    await fetchPublicReviews();
+    const opts = mockFetch.mock.calls[0][1] ?? {};
+    expect(opts.headers).toBeUndefined();
+  });
+
+  it("returns empty array when the API responds with an error", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false });
+    expect(await fetchPublicReviews()).toEqual([]);
+  });
+
+  it("returns empty array when fetch rejects", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await fetchPublicReviews()).toEqual([]);
+  });
+});
+
+// ── fetchPublicStats ──────────────────────────────────────────────────────────
+
+describe("fetchPublicStats", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("returns stats payload on 200", async () => {
+    const stats = {
+      listings_total: 12,
+      universities_total: 3,
+      match_satisfaction_pct: 92,
+      avg_time_to_match_hours: 6,
+      review_count: 4,
+      as_of: "2026-06-19T00:00:00Z",
+    };
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => stats });
+    expect(await fetchPublicStats()).toEqual(stats);
+  });
+
+  it("returns null when the API responds with an error", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false });
+    expect(await fetchPublicStats()).toBeNull();
+  });
+
+  it("returns null when fetch rejects", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await fetchPublicStats()).toBeNull();
   });
 });

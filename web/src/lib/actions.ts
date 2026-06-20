@@ -11,6 +11,7 @@ import {
   VibeProfileSchema,
   ListingSchema,
   InviteRequestSchema,
+  ReviewSchema,
 } from "@/lib/schemas";
 import { getSessionUser } from "@/lib/auth";
 
@@ -415,4 +416,101 @@ export async function getPresignedUrl(
   const publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 
   return { url, publicUrl };
+}
+
+// ─── Reviews ──────────────────────────────────────────────────────────────────
+
+export interface PublicReview {
+  id: string;
+  rating: number;
+  body: string;
+  created_at: string;
+  reviewer_display_name: string;
+  reviewer_university: string;
+  listing_title: string;
+}
+
+export interface PublicStats {
+  listings_total: number;
+  universities_total: number;
+  match_satisfaction_pct: number | null;
+  avg_time_to_match_hours: number | null;
+  review_count: number;
+  as_of: string;
+}
+
+export interface ReviewEligibility {
+  eligible: boolean;
+  already_reviewed: boolean;
+  reason?: "already_reviewed" | "not_confirmed" | "not_renter" | "not_found";
+}
+
+export async function submitReview(
+  conversationId: string,
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const parsed = ReviewSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+
+  const res = await fetch(`${GATEWAY}/api/listings/reviews`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      conversation_id: conversationId,
+      rating: parseInt(parsed.data.rating, 10),
+      body: parsed.data.body,
+    }),
+  });
+
+  if (res.status === 409) return { error: "You've already reviewed this match." };
+  if (res.status === 422) return { error: "This match hasn't been confirmed yet." };
+  if (!res.ok) return { error: "Failed to submit review. Please try again." };
+
+  return { toast: "Thanks for your review!" };
+}
+
+export async function fetchReviewEligibility(conversationId: string): Promise<ReviewEligibility | null> {
+  const token = await getBearerToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${GATEWAY}/api/listings/reviews/eligibility?conversation_id=${conversationId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchPublicReviews(): Promise<PublicReview[]> {
+  try {
+    const res = await fetch(`${GATEWAY}/api/public/reviews`, {
+      next: { revalidate: 300 },
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchPublicStats(): Promise<PublicStats | null> {
+  try {
+    const res = await fetch(`${GATEWAY}/api/public/stats`, {
+      next: { revalidate: 300 },
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
 }

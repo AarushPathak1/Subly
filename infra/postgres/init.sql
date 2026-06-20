@@ -98,6 +98,23 @@ CREATE TRIGGER users_updated_at         BEFORE UPDATE ON users         FOR EACH 
 CREATE TRIGGER listings_updated_at      BEFORE UPDATE ON listings      FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER user_profiles_updated_at BEFORE UPDATE ON user_profiles FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- ─── Reviews ────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS reviews (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    reviewer_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    listing_id      UUID REFERENCES listings(id) ON DELETE SET NULL,
+    rating          SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    body            TEXT NOT NULL DEFAULT '',
+    published       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT reviews_reviewer_conversation_unique UNIQUE (reviewer_id, conversation_id)
+);
+
+CREATE INDEX IF NOT EXISTS reviews_published_created_idx
+    ON reviews(published, created_at DESC);
+CREATE INDEX IF NOT EXISTS reviews_rating_idx ON reviews(rating);
+
 -- ─── Invite Requests ────────────────────────────────────────────────────────
 CREATE TYPE invite_request_status AS ENUM ('pending', 'approved', 'rejected', 'redeemed');
 

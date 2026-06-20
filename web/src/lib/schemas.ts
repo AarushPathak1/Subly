@@ -39,3 +39,10 @@ export const InviteRequestSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
   university_name: z.string().min(2, "Please enter your university or college"),
 });
+
+export const ReviewSchema = z.object({
+  rating: z.string().refine((v) => ["1", "2", "3", "4", "5"].includes(v), {
+    message: "Please select a rating",
+  }),
+  body: z.string().max(1000, "Keep it under 1000 characters").optional().default(""),
+});

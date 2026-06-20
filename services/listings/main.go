@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,18 +43,18 @@ type Listing struct {
 }
 
 type Conversation struct {
-	ID                string     `json:"id"`
-	ListingID         string     `json:"listing_id"`
-	ListingTitle      string     `json:"listing_title"`
-	RenterID          string     `json:"renter_id"`
-	ListerID          string     `json:"lister_id"`
-	OtherEmail        string     `json:"other_email"`
-	LastMessageAt     *time.Time `json:"last_message_at,omitempty"`
-	LastMessage       string     `json:"last_message"`
-	UnreadCount       int        `json:"unread_count"`
-	CreatedAt         time.Time  `json:"created_at"`
-	InitialRentCents  int        `json:"initial_rent_cents"`
-	ConfirmedAt       *time.Time `json:"confirmed_at,omitempty"`
+	ID               string     `json:"id"`
+	ListingID        string     `json:"listing_id"`
+	ListingTitle     string     `json:"listing_title"`
+	RenterID         string     `json:"renter_id"`
+	ListerID         string     `json:"lister_id"`
+	OtherEmail       string     `json:"other_email"`
+	LastMessageAt    *time.Time `json:"last_message_at,omitempty"`
+	LastMessage      string     `json:"last_message"`
+	UnreadCount      int        `json:"unread_count"`
+	CreatedAt        time.Time  `json:"created_at"`
+	InitialRentCents int        `json:"initial_rent_cents"`
+	ConfirmedAt      *time.Time `json:"confirmed_at,omitempty"`
 }
 
 type UserProfile struct {
@@ -69,6 +70,42 @@ type Message struct {
 	SenderID       string    `json:"sender_id"`
 	Body           string    `json:"body"`
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+type Review struct {
+	ID             string    `json:"id"`
+	ReviewerID     string    `json:"reviewer_id"`
+	ConversationID string    `json:"conversation_id"`
+	ListingID      string    `json:"listing_id,omitempty"`
+	Rating         int       `json:"rating"`
+	Body           string    `json:"body"`
+	Published      bool      `json:"published"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type PublicReview struct {
+	ID                  string    `json:"id"`
+	Rating              int       `json:"rating"`
+	Body                string    `json:"body"`
+	CreatedAt           time.Time `json:"created_at"`
+	ReviewerDisplayName string    `json:"reviewer_display_name"`
+	ReviewerUniversity  string    `json:"reviewer_university"`
+	ListingTitle        string    `json:"listing_title"`
+}
+
+type PublicStats struct {
+	ListingsTotal        int       `json:"listings_total"`
+	UniversitiesTotal    int       `json:"universities_total"`
+	MatchSatisfactionPct *int      `json:"match_satisfaction_pct"`
+	AvgTimeToMatchHours  *int      `json:"avg_time_to_match_hours"`
+	ReviewCount          int       `json:"review_count"`
+	AsOf                 time.Time `json:"as_of"`
+}
+
+type ReviewEligibility struct {
+	Eligible        bool   `json:"eligible"`
+	AlreadyReviewed bool   `json:"already_reviewed"`
+	Reason          string `json:"reason,omitempty"`
 }
 
 // ─── Server ──────────────────────────────────────────────────────────────────
@@ -95,6 +132,10 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /conversations/{id}/messages", s.handleSendMessage)
 	mux.HandleFunc("POST /conversations/{id}/confirm", s.handleConfirmConversation)
 	mux.HandleFunc("GET /users/{id}/profile", s.handleGetUserProfile)
+	mux.HandleFunc("POST /reviews", s.handleCreateReview)
+	mux.HandleFunc("GET /reviews/eligibility", s.handleReviewEligibility)
+	mux.HandleFunc("GET /public/reviews", s.handleListPublicReviews)
+	mux.HandleFunc("GET /public/stats", s.handlePublicStats)
 	return mux
 }
 
@@ -251,18 +292,42 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		idx++
 	}
 
-	if body.Title != nil          { add("title", *body.Title) }
-	if body.Description != nil    { add("description", *body.Description) }
-	if body.Address != nil        { add("address", *body.Address) }
-	if body.UniversityNear != nil { add("university_near", *body.UniversityNear) }
-	if body.RentCents != nil      { add("rent_cents", *body.RentCents) }
-	if body.AvailableFrom != nil  { add("available_from", *body.AvailableFrom) }
-	if body.AvailableTo != nil    { add("available_to", *body.AvailableTo) }
-	if body.Bedrooms != nil       { add("bedrooms", *body.Bedrooms) }
-	if body.Bathrooms != nil      { add("bathrooms", *body.Bathrooms) }
-	if body.Amenities != nil      { add("amenities", body.Amenities) }
-	if body.Images != nil         { add("images", body.Images) }
-	if body.Status != nil         { add("status", *body.Status) }
+	if body.Title != nil {
+		add("title", *body.Title)
+	}
+	if body.Description != nil {
+		add("description", *body.Description)
+	}
+	if body.Address != nil {
+		add("address", *body.Address)
+	}
+	if body.UniversityNear != nil {
+		add("university_near", *body.UniversityNear)
+	}
+	if body.RentCents != nil {
+		add("rent_cents", *body.RentCents)
+	}
+	if body.AvailableFrom != nil {
+		add("available_from", *body.AvailableFrom)
+	}
+	if body.AvailableTo != nil {
+		add("available_to", *body.AvailableTo)
+	}
+	if body.Bedrooms != nil {
+		add("bedrooms", *body.Bedrooms)
+	}
+	if body.Bathrooms != nil {
+		add("bathrooms", *body.Bathrooms)
+	}
+	if body.Amenities != nil {
+		add("amenities", body.Amenities)
+	}
+	if body.Images != nil {
+		add("images", body.Images)
+	}
+	if body.Status != nil {
+		add("status", *body.Status)
+	}
 
 	// Build WHERE: match id, and if gateway provided X-User-ID enforce ownership
 	where := fmt.Sprintf("id = $%d", idx)
@@ -610,8 +675,9 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Atomically confirm only if not already confirmed, so retried calls (e.g.
-	// Stripe webhook redeliveries) don't re-publish the notification.
+	// Idempotent: preserve existing confirmed_at if already set, and report
+	// whether this call was the one that newly confirmed it so callers
+	// (e.g. the Stripe webhook) can avoid re-publishing on retries.
 	var newlyConfirmed bool
 	err := s.db.QueryRow(ctx, `
 		UPDATE conversations
@@ -622,11 +688,12 @@ func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Reques
 		id, body.StripeSessionID,
 	).Scan(&newlyConfirmed)
 	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) {
+			newlyConfirmed = false // already confirmed; idempotent no-op
+		} else {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
-		newlyConfirmed = false // already confirmed; idempotent no-op
 	}
 
 	if newlyConfirmed {
@@ -660,6 +727,244 @@ func (s *server) handleGetUserProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+// ─── Review handlers ─────────────────────────────────────────────────────────
+
+func (s *server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+		Rating         int    `json:"rating"`
+		Body           string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("invalid body"))
+		return
+	}
+	if body.ConversationID == "" {
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("conversation_id required"))
+		return
+	}
+	if body.Rating < 1 || body.Rating > 5 {
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("rating must be between 1 and 5"))
+		return
+	}
+	trimmedBody := strings.TrimSpace(body.Body)
+	if len([]rune(trimmedBody)) > 1000 {
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("review body exceeds 1000 character limit"))
+		return
+	}
+	ctx := r.Context()
+
+	var renterID, listingID string
+	var confirmedAt *time.Time
+	err := s.db.QueryRow(ctx, `
+		SELECT renter_id, listing_id, confirmed_at
+		FROM conversations WHERE id = $1`, body.ConversationID,
+	).Scan(&renterID, &listingID, &confirmedAt)
+	if err != nil {
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		return
+	}
+	if renterID != userID {
+		writeErr(w, r, http.StatusForbidden, fmt.Errorf("only the renter can leave a review"))
+		return
+	}
+	if confirmedAt == nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "conversation_not_confirmed"})
+		return
+	}
+
+	var id string
+	err = s.db.QueryRow(ctx, `
+		INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id`,
+		userID, body.ConversationID, listingID, body.Rating, trimmedBody,
+	).Scan(&id)
+	if err != nil {
+		if isUniqueViolation(err) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "already_reviewed"})
+			return
+		}
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+func (s *server) handleReviewEligibility(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	conversationID := r.URL.Query().Get("conversation_id")
+	if conversationID == "" {
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("conversation_id required"))
+		return
+	}
+	ctx := r.Context()
+
+	var renterID string
+	var confirmedAt *time.Time
+	err := s.db.QueryRow(ctx, `
+		SELECT renter_id, confirmed_at
+		FROM conversations WHERE id = $1`, conversationID,
+	).Scan(&renterID, &confirmedAt)
+	if err != nil {
+		writeJSON(w, http.StatusOK, ReviewEligibility{Eligible: false, AlreadyReviewed: false, Reason: "not_found"})
+		return
+	}
+	if renterID != userID {
+		writeJSON(w, http.StatusOK, ReviewEligibility{Eligible: false, AlreadyReviewed: false, Reason: "not_renter"})
+		return
+	}
+	if confirmedAt == nil {
+		writeJSON(w, http.StatusOK, ReviewEligibility{Eligible: false, AlreadyReviewed: false, Reason: "not_confirmed"})
+		return
+	}
+
+	var existingID string
+	err = s.db.QueryRow(ctx, `
+		SELECT id FROM reviews WHERE reviewer_id = $1 AND conversation_id = $2`,
+		userID, conversationID,
+	).Scan(&existingID)
+	if err == nil {
+		writeJSON(w, http.StatusOK, ReviewEligibility{Eligible: false, AlreadyReviewed: true, Reason: "already_reviewed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ReviewEligibility{Eligible: true, AlreadyReviewed: false})
+}
+
+func (s *server) handleListPublicReviews(w http.ResponseWriter, r *http.Request) {
+	limit := 6
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 {
+			limit = parsed
+			if limit > 24 {
+				limit = 24
+			}
+		}
+	}
+
+	rows, err := s.db.Query(r.Context(), `
+		SELECT rv.id, rv.rating, rv.body, rv.created_at, u.email,
+		       COALESCE(up.university, u.university, ''),
+		       COALESCE(l.title, '')
+		FROM reviews rv
+		JOIN users u       ON u.id = rv.reviewer_id
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN listings l       ON l.id = rv.listing_id
+		WHERE rv.published = true AND rv.body != ''
+		ORDER BY rv.created_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+	defer rows.Close()
+
+	reviews := make([]PublicReview, 0)
+	for rows.Next() {
+		var pr PublicReview
+		var email string
+		if err := rows.Scan(&pr.ID, &pr.Rating, &pr.Body, &pr.CreatedAt, &email,
+			&pr.ReviewerUniversity, &pr.ListingTitle); err != nil {
+			writeErr(w, r, http.StatusInternalServerError, err)
+			return
+		}
+		pr.ReviewerDisplayName = displayNameFromEmail(email)
+		reviews = append(reviews, pr)
+	}
+	writeJSON(w, http.StatusOK, reviews)
+}
+
+func (s *server) handlePublicStats(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var stats PublicStats
+	stats.AsOf = time.Now()
+
+	if err := s.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM listings WHERE status IN ('active', 'leased', 'expired')`,
+	).Scan(&stats.ListingsTotal); err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	if err := s.db.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT lower(trim(university_near)))
+		FROM listings
+		WHERE status IN ('active', 'leased', 'expired')
+		  AND university_near IS NOT NULL AND university_near <> ''`,
+	).Scan(&stats.UniversitiesTotal); err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	if err := s.db.QueryRow(ctx, `
+		SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE rating >= 4) / NULLIF(COUNT(*), 0))
+		FROM reviews WHERE published = true`,
+	).Scan(&stats.MatchSatisfactionPct); err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	if err := s.db.QueryRow(ctx, `
+		SELECT ROUND(EXTRACT(EPOCH FROM AVG(confirmed_at - created_at)) / 3600)
+		FROM conversations WHERE confirmed_at IS NOT NULL`,
+	).Scan(&stats.AvgTimeToMatchHours); err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	if err := s.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM reviews WHERE published = true`,
+	).Scan(&stats.ReviewCount); err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func displayNameFromEmail(email string) string {
+	local := email
+	if i := strings.Index(email, "@"); i >= 0 {
+		local = email[:i]
+	}
+	if i := strings.Index(local, "."); i >= 0 {
+		first := local[:i]
+		rest := local[i+1:]
+		if first == "" {
+			return ""
+		}
+		firstName := strings.ToUpper(first[:1]) + first[1:]
+		if rest == "" {
+			return firstName + "."
+		}
+		return firstName + " " + strings.ToUpper(rest[:1]) + "."
+	}
+	if local == "" {
+		return ""
+	}
+	cut := local
+	if len(cut) > 6 {
+		cut = cut[:6]
+	}
+	return strings.ToUpper(cut[:1]) + cut[1:] + "."
+}
+
+func isUniqueViolation(err error) bool {
+	return strings.Contains(err.Error(), "reviews_reviewer_conversation_unique") ||
+		strings.Contains(err.Error(), "duplicate key value violates unique constraint")
 }
 
 // ─── Expiration worker ───────────────────────────────────────────────────────

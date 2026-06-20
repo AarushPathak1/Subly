@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { GetStartedFlow } from "@/components/GetStartedFlow";
 import { LandingNav } from "./LandingNav";
+import { fetchPublicStats, fetchPublicReviews, type PublicReview } from "@/lib/actions";
 
 function CheckIcon() {
   return (
@@ -45,17 +46,55 @@ function KeyIcon() {
   );
 }
 
-function StarIcon() {
+function StarIcon({ filled = true }: { filled?: boolean }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="#f59e0b">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill={filled ? "#f59e0b" : "none"} stroke="#f59e0b" strokeWidth="1">
       <path d="M8 1l1.8 3.6L14 5.3l-3 2.9.7 4.1L8 10.4l-3.7 1.9.7-4.1-3-2.9 4.2-.7L8 1z" />
     </svg>
   );
 }
 
+function StarRow({ rating }: { rating: number }) {
+  return (
+    <div className="flex gap-0.5">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <StarIcon key={i} filled={i <= rating} />
+      ))}
+    </div>
+  );
+}
+
+function InitialsAvatar({ name }: { name: string }) {
+  const initial = name.trim().charAt(0).toUpperCase() || "?";
+  return (
+    <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+      <span className="text-sm font-bold text-indigo-600">{initial}</span>
+    </div>
+  );
+}
+
+function statValue(value: number, fallback: string): string {
+  return value > 0 ? formatCount(value) : fallback;
+}
+
+function formatCount(value: number): string {
+  if (value >= 1000) return `${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)}k+`;
+  return `${value}+`;
+}
+
 export default async function Home() {
   const { userId } = await auth();
   if (userId) redirect("/dashboard");
+
+  const [stats, reviews] = await Promise.all([
+    fetchPublicStats().catch(() => null),
+    fetchPublicReviews().catch(() => [] as PublicReview[]),
+  ]);
+
+  const listingsTotal = stats?.listings_total ?? 0;
+  const universitiesTotal = stats?.universities_total ?? 0;
+  const matchSatisfactionPct = stats?.match_satisfaction_pct ?? null;
+  const avgTimeToMatchHours = stats?.avg_time_to_match_hours ?? null;
 
   return (
     <div className="relative min-h-screen bg-white">
@@ -100,8 +139,8 @@ export default async function Home() {
 
               <div className="flex items-center gap-8">
                 {[
-                  { value: "10k+", label: "Listings posted" },
-                  { value: "500+", label: "Universities" },
+                  { value: statValue(listingsTotal, "Just launched"), label: "Listings posted" },
+                  { value: statValue(universitiesTotal, "Just launched"), label: "Universities" },
                   { value: "0", label: "Verified scams" },
                 ].map(({ value, label }) => (
                   <div key={label}>
@@ -338,10 +377,10 @@ export default async function Home() {
         <div className="max-w-5xl mx-auto px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
             {[
-              { value: "10,000+", label: "Listings posted" },
-              { value: "500+", label: "Universities" },
-              { value: "98%", label: "Match satisfaction" },
-              { value: "Under 24h", label: "Avg. time to match" },
+              { value: statValue(listingsTotal, "Just launched"), label: "Listings posted" },
+              { value: statValue(universitiesTotal, "Just launched"), label: "Universities" },
+              { value: matchSatisfactionPct !== null ? `${matchSatisfactionPct}%` : "Coming soon", label: "Match satisfaction" },
+              { value: avgTimeToMatchHours !== null ? `Under ${avgTimeToMatchHours}h` : "Coming soon", label: "Avg. time to match" },
             ].map(({ value, label }) => (
               <div key={label}>
                 <p className="text-4xl font-extrabold text-white mb-2">{value}</p>
@@ -360,42 +399,32 @@ export default async function Home() {
             <h2 className="text-4xl font-extrabold text-slate-900">They found their place. You can too.</h2>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-6">
-            {[
-              {
-                quote: "I was dreading the sublease search. Subly matched me with the perfect 1-bed near UT engineering in under an hour. The scam badge alone saved me from two listings I almost responded to.",
-                name: "Priya R.",
-                school: "UT Austin, Computer Science",
-                avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=80&auto=format&fit=crop&q=80",
-              },
-              {
-                quote: "I listed my apartment and had five serious inquiries within 24 hours, all from verified students. No random strangers, no lowballers. This is genuinely how subletting should work.",
-                name: "Marcus T.",
-                school: "UCLA, Business",
-                avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=80&auto=format&fit=crop&q=80",
-              },
-              {
-                quote: "The AI matching is genuinely impressive. I described my situation in a sentence and it surfaced listings I never would have found with filters alone. Moved in without seeing a single scam.",
-                name: "Emily S.",
-                school: "Georgia Tech, ECE",
-                avatar: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=80&auto=format&fit=crop&q=80",
-              },
-            ].map(({ quote, name, school, avatar }) => (
-              <div key={name} className="bg-slate-50 rounded-2xl p-6 flex flex-col gap-4 border border-slate-100 hover:border-indigo-200 hover:shadow-md transition">
-                <div className="flex gap-0.5">
-                  {[...Array(5)].map((_, i) => <StarIcon key={i} />)}
-                </div>
-                <p className="text-slate-700 text-sm leading-relaxed flex-1">&ldquo;{quote}&rdquo;</p>
-                <div className="flex items-center gap-3 pt-2 border-t border-slate-200">
-                  <img src={avatar} alt={name} className="w-10 h-10 rounded-full object-cover" />
-                  <div>
-                    <p className="text-sm font-bold text-slate-900">{name}</p>
-                    <p className="text-xs text-slate-500">{school}</p>
+          {reviews.length === 0 ? (
+            <div className="max-w-md mx-auto bg-slate-50 rounded-2xl p-8 text-center border border-slate-100">
+              <p className="text-slate-700 font-medium mb-4">Be one of the first to share your Subly story.</p>
+              <Link href="/dashboard" className="inline-block px-6 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition">
+                Go to dashboard
+              </Link>
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-3 gap-6">
+              {reviews.map((review) => (
+                <div key={review.id} className="bg-slate-50 rounded-2xl p-6 flex flex-col gap-4 border border-slate-100 hover:border-indigo-200 hover:shadow-md transition">
+                  <StarRow rating={review.rating} />
+                  <p className="text-slate-700 text-sm leading-relaxed flex-1">&ldquo;{review.body}&rdquo;</p>
+                  <div className="flex items-center gap-3 pt-2 border-t border-slate-200">
+                    <InitialsAvatar name={review.reviewer_display_name} />
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">{review.reviewer_display_name}</p>
+                      <p className="text-xs text-slate-500">
+                        {review.reviewer_university || review.listing_title}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
