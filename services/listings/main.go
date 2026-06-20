@@ -844,6 +844,10 @@ func (s *server) handleReviewEligibility(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusOK, ReviewEligibility{Eligible: false, AlreadyReviewed: true, Reason: "already_reviewed"})
 		return
 	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
 
 	writeJSON(w, http.StatusOK, ReviewEligibility{Eligible: true, AlreadyReviewed: false})
 }
@@ -891,50 +895,45 @@ func (s *server) handleListPublicReviews(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, reviews)
 }
 
+// statQuery runs a single stats query and scans it into dest. Failures are
+// logged and swallowed rather than failing the whole response — the landing
+// page must keep rendering even if one of these five queries breaks, and
+// the zero/nil value dest already holds is a valid fallback for every field.
+func (s *server) statQuery(ctx context.Context, query string, dest any) {
+	if err := s.db.QueryRow(ctx, query).Scan(dest); err != nil {
+		log.Error("public stats query failed", "request_id", logger.RequestIDFrom(ctx), "error", err)
+	}
+}
+
 func (s *server) handlePublicStats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var stats PublicStats
 	stats.AsOf = time.Now()
 
-	if err := s.db.QueryRow(ctx, `
+	s.statQuery(ctx, `
 		SELECT COUNT(*) FROM listings WHERE status IN ('active', 'leased', 'expired')`,
-	).Scan(&stats.ListingsTotal); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
-		return
-	}
+		&stats.ListingsTotal)
 
-	if err := s.db.QueryRow(ctx, `
+	s.statQuery(ctx, `
 		SELECT COUNT(DISTINCT lower(trim(university_near)))
 		FROM listings
 		WHERE status IN ('active', 'leased', 'expired')
 		  AND university_near IS NOT NULL AND university_near <> ''`,
-	).Scan(&stats.UniversitiesTotal); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
-		return
-	}
+		&stats.UniversitiesTotal)
 
-	if err := s.db.QueryRow(ctx, `
+	s.statQuery(ctx, `
 		SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE rating >= 4) / NULLIF(COUNT(*), 0))
 		FROM reviews WHERE published = true`,
-	).Scan(&stats.MatchSatisfactionPct); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
-		return
-	}
+		&stats.MatchSatisfactionPct)
 
-	if err := s.db.QueryRow(ctx, `
+	s.statQuery(ctx, `
 		SELECT ROUND(EXTRACT(EPOCH FROM AVG(confirmed_at - created_at)) / 3600)
 		FROM conversations WHERE confirmed_at IS NOT NULL`,
-	).Scan(&stats.AvgTimeToMatchHours); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
-		return
-	}
+		&stats.AvgTimeToMatchHours)
 
-	if err := s.db.QueryRow(ctx, `
+	s.statQuery(ctx, `
 		SELECT COUNT(*) FROM reviews WHERE published = true`,
-	).Scan(&stats.ReviewCount); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
-		return
-	}
+		&stats.ReviewCount)
 
 	writeJSON(w, http.StatusOK, stats)
 }
