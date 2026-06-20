@@ -8,6 +8,7 @@ import {
   type ChatMessage,
 } from "@/lib/actions";
 import { calculateMatchFee } from "@/lib/fees";
+import { capture } from "@/lib/posthog/client";
 
 interface ThreadClientProps {
   conversationId: string;
@@ -59,6 +60,11 @@ export function ThreadClient({
     setInput("");
     const { error } = await sendMessage(conversationId, body);
     if (!error) {
+      capture("message_sent", {
+        conversation_id: conversationId,
+        is_lister: isLister,
+        message_length: body.length,
+      });
       const updated = await fetchMessages(conversationId);
       setMessages(updated);
     }

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { UniversityCombobox } from "@/components/UniversityCombobox";
 import { createListing, updateListing, getPresignedUrl } from "@/lib/actions";
 import { ListingSchema } from "@/lib/schemas";
+import { capture } from "@/lib/posthog/client";
 
 const inputCls =
   "w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none bg-slate-50 placeholder:text-slate-400 transition";
@@ -155,6 +156,16 @@ export default function ListingForm({ onImagesChange, initialValues, mode = "cre
       if ("error" in result) {
         setServerError(result.error);
       } else if ("toast" in result) {
+        if (mode !== "edit") {
+          capture("listing_created", {
+            rent_cents: Math.round(parseFloat(parsed.data.rent) * 100),
+            bedrooms: parseInt(parsed.data.bedrooms, 10),
+            bathrooms: parseFloat(parsed.data.bathrooms),
+            university_near: parsed.data.university_near,
+            image_count: images.length,
+            has_end_date: !!parsed.data.available_to,
+          });
+        }
         toast.success(result.toast, {
           description: mode === "edit"
             ? "Your changes are live."

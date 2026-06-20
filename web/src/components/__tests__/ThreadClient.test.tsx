@@ -10,6 +10,7 @@ const mockCreateCheckoutSession = vi.fn();
 const mockCalculateMatchFee = vi.fn((cents: number) =>
   cents < 100000 ? 2900 : cents < 200000 ? 4900 : 7900
 );
+const mockCapture = vi.fn();
 
 vi.mock("@/lib/actions", () => ({
   fetchMessages: (...args: unknown[]) => mockFetchMessages(...args),
@@ -19,6 +20,10 @@ vi.mock("@/lib/actions", () => ({
 
 vi.mock("@/lib/fees", () => ({
   calculateMatchFee: (cents: number) => mockCalculateMatchFee(cents),
+}));
+
+vi.mock("@/lib/posthog/client", () => ({
+  capture: (...args: unknown[]) => mockCapture(...args),
 }));
 
 // Capture window.location.href assignments
@@ -150,6 +155,30 @@ describe("message input", () => {
     await userEvent.type(textarea, "New message");
     await userEvent.click(screen.getByRole("button", { name: /send/i }));
     await waitFor(() => expect(screen.getByText("New message")).toBeInTheDocument());
+  });
+
+  it("fires message_sent after a successful send with correct properties", async () => {
+    render(<ThreadClient {...defaultProps} />);
+    const textarea = screen.getByPlaceholderText(/type a message/i);
+    await userEvent.type(textarea, "New message");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() =>
+      expect(mockCapture).toHaveBeenCalledWith("message_sent", {
+        conversation_id: "c1",
+        is_lister: true,
+        message_length: "New message".length,
+      })
+    );
+  });
+
+  it("does not fire message_sent when send fails", async () => {
+    mockSendMessage.mockResolvedValueOnce({ error: "Failed to send message" });
+    render(<ThreadClient {...defaultProps} />);
+    const textarea = screen.getByPlaceholderText(/type a message/i);
+    await userEvent.type(textarea, "Will fail");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() => expect(mockSendMessage).toHaveBeenCalled());
+    expect(mockCapture).not.toHaveBeenCalled();
   });
 });
 

@@ -468,7 +468,7 @@ func TestIntegration_ConfirmConversation_Idempotent(t *testing.T) {
 	convID := seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
 	s := &server{db: db}
 
-	confirm := func() {
+	confirm := func() bool {
 		body := `{"stripe_session_id":"sess_abc"}`
 		req := httptest.NewRequest(http.MethodPost, "/conversations/"+convID+"/confirm", bytes.NewBufferString(body))
 		req.SetPathValue("id", convID)
@@ -479,20 +479,31 @@ func TestIntegration_ConfirmConversation_Idempotent(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d", w.Code)
 		}
+		var resp struct {
+			NewlyConfirmed bool `json:"newly_confirmed"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		return resp.NewlyConfirmed
 	}
 
-	confirm()
+	if newlyConfirmed := confirm(); !newlyConfirmed {
+		t.Error("expected newly_confirmed=true on first confirm")
+	}
 	var firstConfirmedAt *time.Time
 	db.QueryRow(context.Background(), `SELECT confirmed_at FROM conversations WHERE id = $1`, convID).Scan(&firstConfirmedAt)
 
-	confirm() // second call
+	if newlyConfirmed := confirm(); newlyConfirmed { // second call — retry/redelivery
+		t.Error("expected newly_confirmed=false on repeated confirm")
+	}
 	var secondConfirmedAt *time.Time
 	db.QueryRow(context.Background(), `SELECT confirmed_at FROM conversations WHERE id = $1`, convID).Scan(&secondConfirmedAt)
 
 	if firstConfirmedAt == nil || secondConfirmedAt == nil {
 		t.Fatal("confirmed_at should be set after both calls")
 	}
-	// COALESCE ensures the timestamp is preserved, not overwritten
+	// confirmed_at must not be touched on the second (no-op) call
 	if !firstConfirmedAt.Equal(*secondConfirmedAt) {
 		t.Errorf("confirmed_at changed on second call: %v → %v", firstConfirmedAt, secondConfirmedAt)
 	}
