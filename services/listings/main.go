@@ -134,8 +134,12 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /users/{id}/profile", s.handleGetUserProfile)
 	mux.HandleFunc("POST /reviews", s.handleCreateReview)
 	mux.HandleFunc("GET /reviews/eligibility", s.handleReviewEligibility)
-	mux.HandleFunc("GET /public/reviews", s.handleListPublicReviews)
-	mux.HandleFunc("GET /public/stats", s.handlePublicStats)
+	// Registered without a "/public" segment because the gateway's
+	// /api/public prefix is stripped entirely before forwarding (see
+	// gateway/main.go buildRoutes + http.StripPrefix), unlike /api/listings
+	// and /api/messages which forward their remainder verbatim.
+	mux.HandleFunc("GET /reviews", s.handleListPublicReviews)
+	mux.HandleFunc("GET /stats", s.handlePublicStats)
 	return mux
 }
 

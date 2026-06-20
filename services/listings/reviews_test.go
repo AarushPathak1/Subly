@@ -457,7 +457,7 @@ func TestIntegration_ListPublicReviews_Empty(t *testing.T) {
 	db := requireDB(t)
 	s := &server{db: db}
 
-	req := httptest.NewRequest(http.MethodGet, "/public/reviews", nil)
+	req := httptest.NewRequest(http.MethodGet, "/reviews", nil)
 	w := httptest.NewRecorder()
 	s.handleListPublicReviews(w, req)
 
@@ -506,7 +506,7 @@ func TestIntegration_ListPublicReviews_FiltersUnpublishedAndEmptyBody(t *testing
 	cleanupReview(t, db, emptyBodyID)
 
 	s := &server{db: db}
-	req := httptest.NewRequest(http.MethodGet, "/public/reviews", nil)
+	req := httptest.NewRequest(http.MethodGet, "/reviews", nil)
 	w := httptest.NewRecorder()
 	s.handleListPublicReviews(w, req)
 
@@ -541,14 +541,14 @@ func TestIntegration_ListPublicReviews_LimitClamping(t *testing.T) {
 	// Invalid limit falls back to default (6); we cannot easily assert the
 	// exact default count without seeding 6+ reviews, so assert no error and
 	// that an oversized limit value does not crash the handler.
-	req := httptest.NewRequest(http.MethodGet, "/public/reviews?limit=abc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/reviews?limit=abc", nil)
 	w := httptest.NewRecorder()
 	s.handleListPublicReviews(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 for invalid limit, got %d", w.Code)
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/public/reviews?limit=9999", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/reviews?limit=9999", nil)
 	w2 := httptest.NewRecorder()
 	s.handleListPublicReviews(w2, req2)
 	if w2.Code != http.StatusOK {
@@ -581,7 +581,7 @@ func TestIntegration_ListPublicReviews_LimitActuallyClamps(t *testing.T) {
 
 	s := &server{db: db}
 
-	req := httptest.NewRequest(http.MethodGet, "/public/reviews?limit=9999", nil)
+	req := httptest.NewRequest(http.MethodGet, "/reviews?limit=9999", nil)
 	w := httptest.NewRecorder()
 	s.handleListPublicReviews(w, req)
 	var reviews []PublicReview
@@ -590,7 +590,7 @@ func TestIntegration_ListPublicReviews_LimitActuallyClamps(t *testing.T) {
 		t.Errorf("expected oversized limit to clamp to 24, got %d reviews", len(reviews))
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/public/reviews?limit=3", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/reviews?limit=3", nil)
 	w2 := httptest.NewRecorder()
 	s.handleListPublicReviews(w2, req2)
 	var reviews2 []PublicReview
@@ -599,7 +599,7 @@ func TestIntegration_ListPublicReviews_LimitActuallyClamps(t *testing.T) {
 		t.Errorf("expected explicit limit=3 to be respected, got %d reviews", len(reviews2))
 	}
 
-	req3 := httptest.NewRequest(http.MethodGet, "/public/reviews?limit=abc", nil)
+	req3 := httptest.NewRequest(http.MethodGet, "/reviews?limit=abc", nil)
 	w3 := httptest.NewRecorder()
 	s.handleListPublicReviews(w3, req3)
 	var reviews3 []PublicReview
@@ -634,7 +634,7 @@ func TestIntegration_ListPublicReviews_NullListingFallsBackToEmptyTitle(t *testi
 	cleanupReview(t, db, reviewID)
 
 	s := &server{db: db}
-	req := httptest.NewRequest(http.MethodGet, "/public/reviews", nil)
+	req := httptest.NewRequest(http.MethodGet, "/reviews", nil)
 	w := httptest.NewRecorder()
 	s.handleListPublicReviews(w, req)
 	if w.Code != http.StatusOK {
@@ -673,7 +673,7 @@ func TestIntegration_PublicStats_EmptyDB(t *testing.T) {
 		t.Skipf("DB not empty (listings=%d conversations=%d reviews=%d) — skipping to avoid a false-positive null check; run in isolation against a fresh DB", listingsCount, conversationsCount, reviewsCount)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/public/stats", nil)
+	req := httptest.NewRequest(http.MethodGet, "/stats", nil)
 	w := httptest.NewRecorder()
 	s.handlePublicStats(w, req)
 
@@ -720,7 +720,7 @@ func TestIntegration_PublicStats_ComputedFromSeededData(t *testing.T) {
 	cleanupReview(t, db, reviewID)
 
 	s := &server{db: db}
-	req := httptest.NewRequest(http.MethodGet, "/public/stats", nil)
+	req := httptest.NewRequest(http.MethodGet, "/stats", nil)
 	w := httptest.NewRecorder()
 	s.handlePublicStats(w, req)
 
