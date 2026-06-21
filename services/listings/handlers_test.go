@@ -193,3 +193,68 @@ func TestIntegration_ListListings(t *testing.T) {
 		t.Errorf("response body is not a valid JSON array: %v", err)
 	}
 }
+
+// TestIntegration_GetListing_NullableColumns guards against a regression
+// where university_near/available_to/description being NULL (legal per
+// schema — seedTestListing omits them) caused handleGet to 500 because the
+// scan targets were plain strings instead of sql.NullString.
+func TestIntegration_GetListing_NullableColumns(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	listingID := seedTestListing(t, db, testUserID, 100000)
+	s := &server{db: db}
+
+	req := httptest.NewRequest(http.MethodGet, "/listings/"+listingID, nil)
+	req.SetPathValue("id", listingID)
+	w := httptest.NewRecorder()
+	s.handleGet(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got Listing
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if got.UniversityNear != "" {
+		t.Errorf("expected empty university_near for a NULL column, got %q", got.UniversityNear)
+	}
+	if got.AvailableTo != "" {
+		t.Errorf("expected empty available_to for a NULL column, got %q", got.AvailableTo)
+	}
+}
+
+// TestIntegration_ListListings_NullableColumns is the handleList analog of
+// the above — same NULL columns, reached via the list endpoint's separate
+// scan call.
+func TestIntegration_ListListings_NullableColumns(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	listingID := seedTestListing(t, db, testUserID, 100000)
+	db.Exec(context.Background(), `UPDATE listings SET status = 'active' WHERE id = $1`, listingID)
+	s := &server{db: db}
+
+	req := httptest.NewRequest(http.MethodGet, "/listings", nil)
+	w := httptest.NewRecorder()
+	s.handleList(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var listings []Listing
+	if err := json.NewDecoder(w.Body).Decode(&listings); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	found := false
+	for _, l := range listings {
+		if l.ID == listingID {
+			found = true
+			if l.UniversityNear != "" || l.AvailableTo != "" {
+				t.Errorf("expected empty nullable fields, got university_near=%q available_to=%q", l.UniversityNear, l.AvailableTo)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected seeded listing %s to appear in list", listingID)
+	}
+}

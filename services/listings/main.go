@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -191,13 +192,15 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	listings := make([]Listing, 0)
 	for rows.Next() {
 		var l Listing
-		if err := rows.Scan(&l.ID, &l.UserID, &l.Title, &l.Description, &l.Address,
-			&l.UniversityNear, &l.RentCents, &l.AvailableFrom, &l.AvailableTo,
+		var description, universityNear, availableTo sql.NullString
+		if err := rows.Scan(&l.ID, &l.UserID, &l.Title, &description, &l.Address,
+			&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
 			&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
 			&l.Status, &l.ScamScore, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
+		l.Description, l.UniversityNear, l.AvailableTo = description.String, universityNear.String, availableTo.String
 		if r.Header.Get("X-User-ID") != l.UserID {
 			l.ScamScore = 0
 		}
@@ -252,19 +255,21 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var l Listing
+	var description, universityNear, availableTo sql.NullString
 	err := s.db.QueryRow(r.Context(),
 		`SELECT id, user_id, title, description, address, university_near,
 		        rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
 		        amenities, images, status, scam_score, created_at, updated_at
 		 FROM listings WHERE id = $1`, id,
-	).Scan(&l.ID, &l.UserID, &l.Title, &l.Description, &l.Address,
-		&l.UniversityNear, &l.RentCents, &l.AvailableFrom, &l.AvailableTo,
+	).Scan(&l.ID, &l.UserID, &l.Title, &description, &l.Address,
+		&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
 		&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
 		&l.Status, &l.ScamScore, &l.CreatedAt, &l.UpdatedAt)
 	if err != nil {
 		writeErr(w, r, http.StatusNotFound, err)
 		return
 	}
+	l.Description, l.UniversityNear, l.AvailableTo = description.String, universityNear.String, availableTo.String
 	if r.Header.Get("X-User-ID") != l.UserID {
 		l.ScamScore = 0
 	}
@@ -1033,13 +1038,15 @@ func (s *server) handleListSaved(w http.ResponseWriter, r *http.Request) {
 	saved := make([]SavedListing, 0)
 	for rows.Next() {
 		var sl SavedListing
-		if err := rows.Scan(&sl.ID, &sl.UserID, &sl.Title, &sl.Description, &sl.Address,
-			&sl.UniversityNear, &sl.RentCents, &sl.AvailableFrom, &sl.AvailableTo,
+		var description, universityNear, availableTo sql.NullString
+		if err := rows.Scan(&sl.ID, &sl.UserID, &sl.Title, &description, &sl.Address,
+			&universityNear, &sl.RentCents, &sl.AvailableFrom, &availableTo,
 			&sl.Bedrooms, &sl.Bathrooms, &sl.Amenities, &sl.Images,
 			&sl.Status, &sl.ScamScore, &sl.CreatedAt, &sl.UpdatedAt, &sl.SavedAt); err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
+		sl.Description, sl.UniversityNear, sl.AvailableTo = description.String, universityNear.String, availableTo.String
 		if userID != sl.UserID {
 			sl.ScamScore = 0
 		}

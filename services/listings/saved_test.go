@@ -21,10 +21,11 @@ func cleanupSavedListing(t *testing.T, db *pgxpool.Pool, userID, listingID strin
 }
 
 // backfillNullableListingCols sets university_near and available_to on a
-// listing seeded via seedTestListing (which leaves both NULL). handleListSaved
-// scans both into non-nullable string fields — the same shape handleList/
-// handleGet already use — so any test exercising that scan path needs
-// non-NULL values here.
+// listing seeded via seedTestListing (which leaves both NULL). Used by tests
+// that want to assert on non-empty values for these fields specifically
+// (e.g. checking a real university name made it through a response). NULL
+// values are handled safely by handleListSaved without this helper — see
+// TestIntegration_ListSaved_NullableColumns.
 func backfillNullableListingCols(t *testing.T, db *pgxpool.Pool, listingID string) {
 	t.Helper()
 	if _, err := db.Exec(context.Background(),
@@ -347,6 +348,50 @@ func TestIntegration_ListSaved_Empty(t *testing.T) {
 	}
 	if saved == nil {
 		t.Error("expected empty array, not null")
+	}
+}
+
+// TestIntegration_ListSaved_NullableColumns guards against a regression
+// where a saved listing with NULL university_near/available_to (legal per
+// schema, and exactly what seedTestListing produces) caused handleListSaved
+// to 500 because the scan targets were plain strings instead of
+// sql.NullString. Deliberately does NOT call backfillNullableListingCols.
+func TestIntegration_ListSaved_NullableColumns(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	listingID := seedTestListing(t, db, testUserID, 120000)
+
+	db.Exec(context.Background(),
+		`INSERT INTO saved_listings (user_id, listing_id) VALUES ($1, $2)`, testUserID, listingID)
+	cleanupSavedListing(t, db, testUserID, listingID)
+
+	s := &server{db: db}
+	req := httptest.NewRequest(http.MethodGet, "/saved", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+	s.handleListSaved(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var saved []SavedListing
+	if err := json.NewDecoder(w.Body).Decode(&saved); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	found := false
+	for _, sl := range saved {
+		if sl.ID == listingID {
+			found = true
+			if sl.UniversityNear != "" {
+				t.Errorf("expected empty university_near for a NULL column, got %q", sl.UniversityNear)
+			}
+			if sl.AvailableTo != "" {
+				t.Errorf("expected empty available_to for a NULL column, got %q", sl.AvailableTo)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected seeded listing %s to appear in saved list", listingID)
 	}
 }
 
