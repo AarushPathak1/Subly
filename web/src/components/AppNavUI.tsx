@@ -2,7 +2,7 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { SublyLogo } from "./SublyLogo";
 
-export type AppNavActive = "dashboard" | "browse" | "my-listings" | "new-listing" | "onboarding" | "messages" | "profile";
+export type AppNavActive = "dashboard" | "browse" | "saved" | "my-listings" | "new-listing" | "onboarding" | "messages" | "profile";
 
 export interface AppNavUIProps {
   active?: AppNavActive;
@@ -37,6 +37,9 @@ export function AppNavUI({ active, unreadCount = 0 }: AppNavUIProps) {
           </Link>
           <Link href="/listings" className={`text-sm font-medium transition ${active === "browse" ? "text-indigo-400" : "text-slate-400 hover:text-white"}`}>
             Browse
+          </Link>
+          <Link href="/listings/saved" className={`text-sm font-medium transition ${active === "saved" ? "text-indigo-400" : "text-slate-400 hover:text-white"}`}>
+            Saved
           </Link>
           <Link href="/listings/my" className={`text-sm font-medium transition ${active === "my-listings" ? "text-indigo-400" : "text-slate-400 hover:text-white"}`}>
             My listings

@@ -3,6 +3,8 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { AppNav } from "@/components/AppNav";
 import { NonEduGate } from "@/components/NonEduGate";
+import { SaveButton } from "@/components/SaveButton";
+import { fetchSavedListingIds } from "@/lib/actions";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -43,7 +45,7 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
-function MatchCard({ match }: { match: MatchResult }) {
+function MatchCard({ match, isSaved }: { match: MatchResult; isSaved: boolean }) {
   const rent = match.rent_cents != null
     ? `$${(match.rent_cents / 100).toLocaleString()}/mo`
     : "Rent TBD";
@@ -61,12 +63,13 @@ function MatchCard({ match }: { match: MatchResult }) {
       {/* Image placeholder with gradient */}
       <div className={`h-40 relative overflow-hidden ${isHighRisk ? "bg-gradient-to-br from-red-900 to-red-950" : "bg-gradient-to-br from-indigo-900 to-slate-900"}`}>
         <div className="absolute inset-0 opacity-30 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-400 via-transparent to-transparent" />
-        <div className="absolute top-3 left-3 right-3 flex items-start justify-between">
+        <div className="absolute top-3 left-3 right-11 flex items-start justify-between">
           <span className="text-xs font-bold text-white/90 bg-white/15 backdrop-blur-sm px-2.5 py-1 rounded-full">
             {university}
           </span>
           <ScoreBadge score={match.score} />
         </div>
+        <SaveButton listingId={match.listing_id} initialSaved={isSaved} variant="card" />
         <div className="absolute bottom-3 left-3">
           <p className="text-2xl font-extrabold text-white">{rent}</p>
           <p className="text-xs text-white/70 mt-0.5">{beds} bed · {baths} bath</p>
@@ -193,6 +196,7 @@ export default async function DashboardPage() {
   }
 
   const matches = await getMatches(user.id, token!);
+  const savedIds = await fetchSavedListingIds();
   const topScore = matches.length > 0 ? Math.round(matches[0].score * 100) : null;
   const safeMatches = matches.filter((m) => m.scam_score <= 0.7).length;
 
@@ -238,7 +242,7 @@ export default async function DashboardPage() {
           {matches.length === 0 ? (
             <EmptyState />
           ) : (
-            matches.map((m) => <MatchCard key={m.listing_id} match={m} />)
+            matches.map((m) => <MatchCard key={m.listing_id} match={m} isSaved={savedIds.has(m.listing_id)} />)
           )}
         </div>
 

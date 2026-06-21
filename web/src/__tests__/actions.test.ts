@@ -40,6 +40,10 @@ import {
   fetchReviewEligibility,
   fetchPublicReviews,
   fetchPublicStats,
+  saveListing,
+  unsaveListing,
+  fetchSavedListings,
+  fetchSavedListingIds,
 } from "@/lib/actions";
 
 // ── calculateMatchFee ─────────────────────────────────────────────────────────
@@ -437,5 +441,108 @@ describe("fetchPublicStats", () => {
   it("returns null when fetch rejects", async () => {
     mockFetch.mockRejectedValueOnce(new Error("network error"));
     expect(await fetchPublicStats()).toBeNull();
+  });
+});
+
+// ── saveListing ───────────────────────────────────────────────────────────────
+
+describe("saveListing", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("POSTs to /api/listings/saved with the listing_id and bearer token", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true });
+    const result = await saveListing("listing-123");
+    expect(result).toEqual({});
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain("/api/listings/saved");
+    expect(opts.method).toBe("POST");
+    expect(opts.headers.Authorization).toBe("Bearer mock-token");
+    expect(JSON.parse(opts.body)).toEqual({ listing_id: "listing-123" });
+  });
+
+  it("returns an error when the API responds with a non-ok status", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
+    expect(await saveListing("listing-123")).toEqual({ error: "Failed to save listing" });
+  });
+
+  it("returns an error when fetch rejects", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await saveListing("listing-123")).toEqual({ error: "Failed to save listing" });
+  });
+});
+
+// ── unsaveListing ─────────────────────────────────────────────────────────────
+
+describe("unsaveListing", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("DELETEs to /api/listings/saved/{id} with a bearer token and no body", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true });
+    const result = await unsaveListing("listing-456");
+    expect(result).toEqual({});
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain("/api/listings/saved/listing-456");
+    expect(opts.method).toBe("DELETE");
+    expect(opts.headers.Authorization).toBe("Bearer mock-token");
+    expect(opts.body).toBeUndefined();
+  });
+
+  it("returns an error when the API responds with a non-ok status", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 400 });
+    expect(await unsaveListing("listing-456")).toEqual({ error: "Failed to unsave listing" });
+  });
+
+  it("returns an error when fetch rejects", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await unsaveListing("listing-456")).toEqual({ error: "Failed to unsave listing" });
+  });
+});
+
+// ── fetchSavedListings / fetchSavedListingIds ─────────────────────────────────
+
+describe("fetchSavedListings", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("returns the saved listings array on 200", async () => {
+    const saved = [{ id: "l1", title: "Loft", saved_at: "2026-06-01T00:00:00Z" }];
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => saved });
+    expect(await fetchSavedListings()).toEqual(saved);
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain("/api/listings/saved");
+    expect(opts.headers.Authorization).toBe("Bearer mock-token");
+  });
+
+  it("returns an empty array when the API responds with an error", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false });
+    expect(await fetchSavedListings()).toEqual([]);
+  });
+
+  it("returns an empty array when fetch rejects", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await fetchSavedListings()).toEqual([]);
+  });
+});
+
+describe("fetchSavedListingIds", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("returns a Set of listing ids derived from fetchSavedListings", async () => {
+    const saved = [{ id: "l1" }, { id: "l2" }];
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => saved });
+    const ids = await fetchSavedListingIds();
+    expect(ids).toBeInstanceOf(Set);
+    expect(Array.from(ids).sort()).toEqual(["l1", "l2"]);
+  });
+
+  it("returns an empty Set when there are no saved listings", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
+    const ids = await fetchSavedListingIds();
+    expect(ids.size).toBe(0);
+  });
+
+  it("returns an empty Set when the underlying fetch fails", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    const ids = await fetchSavedListingIds();
+    expect(ids.size).toBe(0);
   });
 });

@@ -68,6 +68,7 @@ describe("AppNavUI", () => {
       // Use exact string to avoid matching the back-arrow's title="Back to My matches"
       expect(screen.getByRole("link", { name: "My matches" })).toHaveAttribute("href", "/dashboard");
       expect(screen.getByRole("link", { name: "Browse" })).toHaveAttribute("href", "/listings");
+      expect(screen.getByRole("link", { name: "Saved" })).toHaveAttribute("href", "/listings/saved");
       expect(screen.getByRole("link", { name: "My listings" })).toHaveAttribute("href", "/listings/my");
       expect(screen.getByRole("link", { name: "Post sublease" })).toHaveAttribute("href", "/listings/new");
       expect(screen.getByRole("link", { name: "Messages" })).toHaveAttribute("href", "/messages");
@@ -114,6 +115,12 @@ describe("AppNavUI", () => {
       render(<AppNavUI active="browse" />);
       const dashLink = screen.getByRole("link", { name: "My matches" });
       expect(dashLink.className).toContain("slate");
+    });
+
+    it("saved link is highlighted when active is 'saved'", () => {
+      render(<AppNavUI active="saved" />);
+      const savedLink = screen.getByRole("link", { name: "Saved" });
+      expect(savedLink.className).toContain("indigo");
     });
 
     it("messages link is highlighted when active is 'messages'", () => {

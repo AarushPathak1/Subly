@@ -108,6 +108,11 @@ type ReviewEligibility struct {
 	Reason          string `json:"reason,omitempty"`
 }
 
+type SavedListing struct {
+	Listing
+	SavedAt time.Time `json:"saved_at"`
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 type server struct {
@@ -140,6 +145,9 @@ func (s *server) routes() http.Handler {
 	// and /api/messages which forward their remainder verbatim.
 	mux.HandleFunc("GET /reviews", s.handleListPublicReviews)
 	mux.HandleFunc("GET /stats", s.handlePublicStats)
+	mux.HandleFunc("GET /saved", s.handleListSaved)
+	mux.HandleFunc("POST /saved", s.handleSaveListing)
+	mux.HandleFunc("DELETE /saved/{listing_id}", s.handleUnsaveListing)
 	return mux
 }
 
@@ -936,6 +944,108 @@ func (s *server) handlePublicStats(w http.ResponseWriter, r *http.Request) {
 		&stats.ReviewCount)
 
 	writeJSON(w, http.StatusOK, stats)
+}
+
+// ─── Saved listing handlers ──────────────────────────────────────────────────
+
+func (s *server) handleSaveListing(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	var body struct {
+		ListingID string `json:"listing_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ListingID == "" {
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("listing_id required"))
+		return
+	}
+	ctx := r.Context()
+
+	var exists bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM listings WHERE id = $1)`, body.ListingID).Scan(&exists); err != nil {
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("invalid listing_id"))
+		return
+	}
+	if !exists {
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("listing not found"))
+		return
+	}
+
+	tag, err := s.db.Exec(ctx,
+		`INSERT INTO saved_listings (user_id, listing_id) VALUES ($1, $2)
+		 ON CONFLICT (user_id, listing_id) DO NOTHING`,
+		userID, body.ListingID,
+	)
+	if err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	status := http.StatusOK
+	if tag.RowsAffected() > 0 {
+		status = http.StatusCreated
+	}
+	writeJSON(w, status, map[string]interface{}{"listing_id": body.ListingID, "saved": true})
+}
+
+func (s *server) handleUnsaveListing(w http.ResponseWriter, r *http.Request) {
+	listingID := r.PathValue("listing_id")
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	_, err := s.db.Exec(r.Context(),
+		`DELETE FROM saved_listings WHERE user_id = $1 AND listing_id = $2`,
+		userID, listingID,
+	)
+	if err != nil {
+		writeErr(w, r, http.StatusBadRequest, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) handleListSaved(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	rows, err := s.db.Query(r.Context(), `
+		SELECT l.id, l.user_id, l.title, l.description, l.address, l.university_near,
+		       l.rent_cents, l.available_from::text, l.available_to::text,
+		       l.bedrooms, l.bathrooms, l.amenities, l.images,
+		       l.status, l.scam_score, l.created_at, l.updated_at, sl.created_at
+		FROM saved_listings sl
+		JOIN listings l ON l.id = sl.listing_id
+		WHERE sl.user_id = $1
+		ORDER BY sl.created_at DESC
+		LIMIT 200`, userID)
+	if err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+	defer rows.Close()
+
+	saved := make([]SavedListing, 0)
+	for rows.Next() {
+		var sl SavedListing
+		if err := rows.Scan(&sl.ID, &sl.UserID, &sl.Title, &sl.Description, &sl.Address,
+			&sl.UniversityNear, &sl.RentCents, &sl.AvailableFrom, &sl.AvailableTo,
+			&sl.Bedrooms, &sl.Bathrooms, &sl.Amenities, &sl.Images,
+			&sl.Status, &sl.ScamScore, &sl.CreatedAt, &sl.UpdatedAt, &sl.SavedAt); err != nil {
+			writeErr(w, r, http.StatusInternalServerError, err)
+			return
+		}
+		if userID != sl.UserID {
+			sl.ScamScore = 0
+		}
+		saved = append(saved, sl)
+	}
+	writeJSON(w, http.StatusOK, saved)
 }
 
 func displayNameFromEmail(email string) string {

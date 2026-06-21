@@ -1,7 +1,8 @@
 import { requireEduVerified } from "@/lib/auth";
 import { auth } from "@clerk/nextjs/server";
 import { AppNav } from "@/components/AppNav";
-import { startConversation } from "@/lib/actions";
+import { startConversation, fetchSavedListingIds } from "@/lib/actions";
+import { SaveButton } from "@/components/SaveButton";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -67,6 +68,8 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
 
   const listing: Listing = await res.json();
   const rent = `$${(listing.rent_cents / 100).toLocaleString()}/mo`;
+  const isOwner = user.id === listing.user_id;
+  const savedIds = isOwner ? new Set<string>() : await fetchSavedListingIds();
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -123,7 +126,12 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
                   {listing.address}
                 </p>
               </div>
-              <TrustBadge score={listing.scam_score} />
+              <div className="flex items-center gap-2">
+                <TrustBadge score={listing.scam_score} />
+                {!isOwner && (
+                  <SaveButton listingId={listing.id} initialSaved={savedIds.has(listing.id)} variant="detail" />
+                )}
+              </div>
             </div>
 
             {/* Key stats */}

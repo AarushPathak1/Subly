@@ -514,3 +514,77 @@ export async function fetchPublicStats(): Promise<PublicStats | null> {
     return null;
   }
 }
+
+// ─── Saved listings ───────────────────────────────────────────────────────────
+
+export interface SavedListing {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string;
+  address: string;
+  university_near: string;
+  rent_cents: number;
+  available_from: string;
+  available_to?: string;
+  bedrooms: number;
+  bathrooms: number;
+  amenities: string[];
+  images: string[];
+  status: string;
+  scam_score: number;
+  created_at: string;
+  updated_at: string;
+  saved_at: string;
+}
+
+export async function saveListing(listingId: string): Promise<{ error?: string }> {
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+  try {
+    const res = await fetch(`${GATEWAY}/api/listings/saved`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ listing_id: listingId }),
+    });
+    if (!res.ok) return { error: "Failed to save listing" };
+    return {};
+  } catch {
+    return { error: "Failed to save listing" };
+  }
+}
+
+export async function unsaveListing(listingId: string): Promise<{ error?: string }> {
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+  try {
+    const res = await fetch(`${GATEWAY}/api/listings/saved/${listingId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return { error: "Failed to unsave listing" };
+    return {};
+  } catch {
+    return { error: "Failed to unsave listing" };
+  }
+}
+
+export async function fetchSavedListings(): Promise<SavedListing[]> {
+  const token = await getBearerToken();
+  if (!token) return [];
+  try {
+    const res = await fetch(`${GATEWAY}/api/listings/saved`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchSavedListingIds(): Promise<Set<string>> {
+  const saved = await fetchSavedListings();
+  return new Set(saved.map((s) => s.id));
+}

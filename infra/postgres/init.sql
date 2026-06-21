@@ -132,3 +132,16 @@ CREATE TABLE IF NOT EXISTS invite_requests (
 CREATE INDEX IF NOT EXISTS invite_requests_status_idx ON invite_requests(status);
 
 CREATE TRIGGER invite_requests_updated_at BEFORE UPDATE ON invite_requests FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ─── Saved Listings ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS saved_listings (
+    user_id     UUID NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    listing_id  UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, listing_id)
+);
+
+CREATE INDEX IF NOT EXISTS saved_listings_user_created_idx
+    ON saved_listings(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS saved_listings_listing_idx
+    ON saved_listings(listing_id);

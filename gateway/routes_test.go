@@ -238,3 +238,89 @@ func TestRouteTable_InternalSecretStillBypassesListingsAuth(t *testing.T) {
 		t.Error("expected /api/listings upstream to have been called via internal-secret bypass")
 	}
 }
+
+// ── Saved listings routes ─────────────────────────────────────────────────────
+
+// TestRouteTable_SavedListingsRequireAuth confirms POST/GET/DELETE
+// /api/listings/saved* all require auth and never reach the upstream without
+// a valid Authorization header.
+func TestRouteTable_SavedListingsRequireAuth(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"POST /api/listings/saved", http.MethodPost, "/api/listings/saved"},
+		{"GET /api/listings/saved", http.MethodGet, "/api/listings/saved"},
+		{"DELETE /api/listings/saved/{id}", http.MethodDelete, "/api/listings/saved/00000000-0000-0000-0000-000000000001"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			auth := newOKAuthServer("user-1", true) // would succeed if consulted
+			defer auth.Close()
+
+			mux, called := buildTestMux(t, auth.URL, "")
+
+			req := httptest.NewRequest(c.method, c.path, nil)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401 for %s with no Authorization header, got %d", c.path, w.Code)
+			}
+			if *called["/api/listings"] {
+				t.Error("upstream should not have been called without auth")
+			}
+		})
+	}
+}
+
+// TestRouteTable_SavedListingsStripsPrefixBeforeUpstream confirms that the
+// gateway's http.StripPrefix("/api/listings", ...) removes the full
+// "/api/listings" prefix before the request reaches the listings service —
+// i.e. POST /api/listings/saved must arrive upstream as POST /saved, not
+// POST /api/listings/saved.
+func TestRouteTable_SavedListingsStripsPrefixBeforeUpstream(t *testing.T) {
+	auth := newOKAuthServer("user-1", true)
+	defer auth.Close()
+
+	authU := mustParseURLForTest(t, "http://auth.invalid")
+	matchingU := mustParseURLForTest(t, "http://matching.invalid")
+
+	var capturedPath string
+	listingsUpstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mux := http.NewServeMux()
+	routes := buildRoutes(authU, mustParseURLForTest(t, "http://listings.invalid"), matchingU)
+	for _, rt := range routes {
+		prefix := rt.prefix
+		var h http.Handler
+		if prefix == "/api/listings" {
+			h = http.StripPrefix(prefix, listingsUpstream)
+		} else {
+			h = http.StripPrefix(prefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+		}
+		if requiresAuth(prefix) {
+			h = authMiddleware(auth.URL, "", h)
+		}
+		mux.Handle(prefix+"/", h)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/listings/saved", nil)
+	req.Header.Set("Authorization", "Bearer good-token")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 with valid auth, got %d", w.Code)
+	}
+	if capturedPath != "/saved" {
+		t.Errorf("expected upstream to see stripped path /saved, got %q", capturedPath)
+	}
+}

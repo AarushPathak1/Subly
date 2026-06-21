@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
+import { SaveButton } from "@/components/SaveButton";
 
 interface Listing {
   id: string;
@@ -17,7 +18,7 @@ interface Listing {
   status: string;
 }
 
-function ListingCard({ listing }: { listing: Listing }) {
+function ListingCard({ listing, isSaved }: { listing: Listing; isSaved: boolean }) {
   const rent = `$${(listing.rent_cents / 100).toLocaleString()}/mo`;
   const isHighRisk = listing.scam_score > 0.7;
   const trustColor = listing.scam_score > 0.7 ? "text-red-500" : listing.scam_score > 0.4 ? "text-amber-500" : "text-emerald-500";
@@ -32,15 +33,17 @@ function ListingCard({ listing }: { listing: Listing }) {
     >
       {/* Image / placeholder */}
       {listing.images && listing.images.length > 0 ? (
-        <div className="h-44 overflow-hidden bg-slate-100">
+        <div className="relative h-44 overflow-hidden bg-slate-100">
           <img
             src={listing.images[0]}
             alt={listing.title}
             className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
           />
+          <SaveButton listingId={listing.id} initialSaved={isSaved} variant="card" />
         </div>
       ) : (
-        <div className={`h-44 flex items-end p-4 ${isHighRisk ? "bg-gradient-to-br from-red-900 to-red-950" : "bg-gradient-to-br from-indigo-900 to-slate-900"}`}>
+        <div className={`relative h-44 flex items-end p-4 ${isHighRisk ? "bg-gradient-to-br from-red-900 to-red-950" : "bg-gradient-to-br from-indigo-900 to-slate-900"}`}>
+          <SaveButton listingId={listing.id} initialSaved={isSaved} variant="card" />
           {listing.university_near && (
             <span className="text-xs font-bold text-white/80 bg-white/15 backdrop-blur-sm px-2.5 py-1 rounded-full">
               {listing.university_near}
@@ -85,9 +88,10 @@ interface BrowseClientProps {
   listings: Listing[];
   universities: string[];
   defaultUniversity?: string;
+  savedIds: string[];
 }
 
-export function BrowseClient({ listings, universities, defaultUniversity = "" }: BrowseClientProps) {
+export function BrowseClient({ listings, universities, defaultUniversity = "", savedIds }: BrowseClientProps) {
   const [university, setUniversity] = useState(defaultUniversity);
   const [maxRent, setMaxRent] = useState("");
   const [minBeds, setMinBeds] = useState("");
@@ -191,7 +195,7 @@ export function BrowseClient({ listings, universities, defaultUniversity = "" }:
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filtered.map((l) => <ListingCard key={l.id} listing={l} />)}
+          {filtered.map((l) => <ListingCard key={l.id} listing={l} isSaved={savedIds.includes(l.id)} />)}
         </div>
       )}
     </>

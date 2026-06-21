@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { AppNav } from "@/components/AppNav";
 import Link from "next/link";
 import { BrowseClient } from "./BrowseClient";
+import { fetchSavedListingIds } from "@/lib/actions";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -34,6 +35,8 @@ export default async function BrowsePage() {
     if (res.ok) listings = await res.json();
   } catch { /* show empty state */ }
 
+  const savedIds = Array.from(await fetchSavedListingIds());
+
   const universities = Array.from(
     new Set(listings.map((l) => l.university_near).filter(Boolean))
   ).sort() as string[];
@@ -61,7 +64,7 @@ export default async function BrowsePage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-8">
-        <BrowseClient listings={listings} universities={universities} defaultUniversity={user.university ?? ""} />
+        <BrowseClient listings={listings} universities={universities} defaultUniversity={user.university ?? ""} savedIds={savedIds} />
       </div>
     </div>
   );
