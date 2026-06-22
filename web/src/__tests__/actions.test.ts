@@ -44,6 +44,8 @@ import {
   unsaveListing,
   fetchSavedListings,
   fetchSavedListingIds,
+  proposeViewing,
+  respondToViewing,
 } from "@/lib/actions";
 
 // ── calculateMatchFee ─────────────────────────────────────────────────────────
@@ -544,5 +546,265 @@ describe("fetchSavedListingIds", () => {
     mockFetch.mockRejectedValueOnce(new Error("network error"));
     const ids = await fetchSavedListingIds();
     expect(ids.size).toBe(0);
+  });
+});
+
+// ── proposeViewing ────────────────────────────────────────────────────────────
+
+describe("proposeViewing", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("returns an empty object on success", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true });
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z")).toEqual({});
+  });
+
+  it("maps invalid_proposed_at to friendly copy", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "invalid_proposed_at" }),
+    });
+    expect(await proposeViewing("conv-1", "2020-01-01T10:00:00Z")).toEqual({
+      error: "Pick a time in the future to propose a viewing.",
+    });
+  });
+
+  it("maps note_too_long to friendly copy", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "note_too_long" }),
+    });
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z", "a".repeat(300))).toEqual({
+      error: "Your note is too long — keep it under 280 characters.",
+    });
+  });
+
+  it("maps conversation_confirmed to friendly copy", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "conversation_confirmed" }),
+    });
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z")).toEqual({
+      error: "This match is already confirmed — no viewing needed.",
+    });
+  });
+
+  it("falls back to 401 copy for an unmapped code with a 401 status", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "some_unmapped_code" }),
+    });
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z")).toEqual({
+      error: "You're signed out. Sign in and try again.",
+    });
+  });
+
+  it("falls back to 403 copy for an unmapped code with a 403 status", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "some_unmapped_code" }),
+    });
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z")).toEqual({
+      error: "You don't have access to this conversation.",
+    });
+  });
+
+  it("falls back to 404 copy for an unmapped code with a 404 status", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: "some_unmapped_code" }),
+    });
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z")).toEqual({
+      error: "This conversation or proposal no longer exists.",
+    });
+  });
+
+  it("falls back to the generic propose copy on a 500/unknown status", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "internal_error" }),
+    });
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z")).toEqual({
+      error: "Couldn't propose a viewing time. Please try again.",
+    });
+  });
+
+  it("falls back to the generic propose copy when error is an empty string", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "" }),
+    });
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z")).toEqual({
+      error: "Couldn't propose a viewing time. Please try again.",
+    });
+  });
+
+  it("falls back to 404 copy when error is an empty string and status is 404", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: "" }),
+    });
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z")).toEqual({
+      error: "This conversation or proposal no longer exists.",
+    });
+  });
+
+  it("falls back to the generic propose copy when the response body isn't JSON", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new Error("not json");
+      },
+    });
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z")).toEqual({
+      error: "Couldn't propose a viewing time. Please try again.",
+    });
+  });
+
+  it("returns an error when fetch rejects (network error)", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await proposeViewing("conv-1", "2026-07-01T10:00:00Z")).toEqual({
+      error: "Failed to propose a viewing time",
+    });
+  });
+});
+
+// ── respondToViewing ──────────────────────────────────────────────────────────
+
+describe("respondToViewing", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("returns an empty object on success", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true });
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({});
+  });
+
+  it("maps proposal_not_pending to friendly copy", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "proposal_not_pending" }),
+    });
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
+      error: "This proposal was already answered. Refresh to see the latest.",
+    });
+  });
+
+  it("maps cannot_respond_to_own_proposal to friendly copy", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "cannot_respond_to_own_proposal" }),
+    });
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
+      error: "You can't accept or decline your own proposal — wait for the other person.",
+    });
+  });
+
+  it("maps invalid_action to friendly copy", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "invalid_action" }),
+    });
+    expect(await respondToViewing("conv-1", "msg-1", "decline")).toEqual({
+      error: "Something went wrong responding to this proposal. Please try again.",
+    });
+  });
+
+  it("falls back to 401 copy for an unmapped code with a 401 status", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "some_unmapped_code" }),
+    });
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
+      error: "You're signed out. Sign in and try again.",
+    });
+  });
+
+  it("falls back to 404 copy for an unmapped code with a 404 status", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: "some_unmapped_code" }),
+    });
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
+      error: "This conversation or proposal no longer exists.",
+    });
+  });
+
+  it("falls back to 403 copy for an unmapped code with a 403 status", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "some_unmapped_code" }),
+    });
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
+      error: "You don't have access to this conversation.",
+    });
+  });
+
+  it("falls back to the generic respond copy on a 500/unknown status", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "internal_error" }),
+    });
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
+      error: "Couldn't respond to the viewing proposal. Please try again.",
+    });
+  });
+
+  it("falls back to the generic respond copy when error is an empty string", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "" }),
+    });
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
+      error: "Couldn't respond to the viewing proposal. Please try again.",
+    });
+  });
+
+  it("falls back to 401 copy when error is an empty string and status is 401", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "" }),
+    });
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
+      error: "You're signed out. Sign in and try again.",
+    });
+  });
+
+  it("falls back to the generic respond copy when the response body isn't JSON", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new Error("not json");
+      },
+    });
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
+      error: "Couldn't respond to the viewing proposal. Please try again.",
+    });
+  });
+
+  it("returns an error when fetch rejects (network error)", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
+      error: "Failed to respond to the viewing proposal",
+    });
   });
 });

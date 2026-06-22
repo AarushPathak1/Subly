@@ -381,7 +381,7 @@ describe("submitting a viewing proposal", () => {
   });
 
   it("keeps the modal open and shows an error message when proposeViewing fails", async () => {
-    mockProposeViewing.mockResolvedValueOnce({ error: "conversation_confirmed" });
+    mockProposeViewing.mockResolvedValueOnce({ error: "This match is already confirmed — no viewing needed." });
     render(<ThreadClient {...defaultProps} confirmedAt={null} />);
     const callsBefore = mockFetchMessages.mock.calls.length;
     await openModalAndSubmit();
@@ -389,7 +389,7 @@ describe("submitting a viewing proposal", () => {
     // The modal stays open and the user now sees an error message instead of
     // silent failure, and messages are not refetched since nothing changed.
     expect(screen.getByText(/propose a viewing time/i)).toBeInTheDocument();
-    expect(screen.getByText(/conversation_confirmed/i)).toBeInTheDocument();
+    expect(screen.getByText(/this match is already confirmed/i)).toBeInTheDocument();
     expect(mockFetchMessages.mock.calls.length).toBe(callsBefore);
   });
 });
@@ -439,7 +439,7 @@ describe("viewing_proposal message rendering", () => {
   });
 
   it("refreshes messages and shows an error message when respond fails", async () => {
-    mockRespondToViewing.mockResolvedValueOnce({ error: "proposal_not_pending" });
+    mockRespondToViewing.mockResolvedValueOnce({ error: "This proposal was already answered. Refresh to see the latest." });
     render(<ThreadClient {...defaultProps} initialMessages={[...baseMessages, proposalMessage]} currentUserId={MY_ID} />);
     const callsBefore = mockFetchMessages.mock.calls.length;
     await userEvent.click(screen.getByRole("button", { name: /accept/i }));
@@ -448,7 +448,7 @@ describe("viewing_proposal message rendering", () => {
     // re-fetches messages so the UI reflects the true server-side state, and
     // the user sees an error message instead of silent failure.
     await waitFor(() => expect(mockFetchMessages.mock.calls.length).toBeGreaterThan(callsBefore));
-    expect(screen.getByText(/proposal_not_pending/i)).toBeInTheDocument();
+    expect(screen.getByText(/this proposal was already answered/i)).toBeInTheDocument();
   });
 
   it("shows waiting text instead of buttons when I am the sender", () => {

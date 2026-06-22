@@ -385,6 +385,39 @@ export async function sendMessage(
   }
 }
 
+const VIEWING_ERROR_COPY: Record<string, string> = {
+  invalid_proposed_at:
+    "Pick a time in the future to propose a viewing.",
+  note_too_long:
+    "Your note is too long — keep it under 280 characters.",
+  invalid_action:
+    "Something went wrong responding to this proposal. Please try again.",
+  conversation_confirmed:
+    "This match is already confirmed — no viewing needed.",
+  proposal_not_pending:
+    "This proposal was already answered. Refresh to see the latest.",
+  cannot_respond_to_own_proposal:
+    "You can't accept or decline your own proposal — wait for the other person.",
+};
+
+async function readViewingError(
+  res: Response,
+  fallback: string,
+): Promise<string> {
+  let code = "";
+  try {
+    const data = (await res.json()) as { error?: unknown };
+    if (typeof data?.error === "string") code = data.error;
+  } catch {
+    // non-JSON / empty body — fall through to status-based copy
+  }
+  if (code && VIEWING_ERROR_COPY[code]) return VIEWING_ERROR_COPY[code];
+  if (res.status === 401) return "You're signed out. Sign in and try again.";
+  if (res.status === 403) return "You don't have access to this conversation.";
+  if (res.status === 404) return "This conversation or proposal no longer exists.";
+  return fallback;
+}
+
 export async function proposeViewing(
   conversationId: string,
   proposedAt: string,
@@ -398,7 +431,9 @@ export async function proposeViewing(
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ proposed_at: proposedAt, note }),
     });
-    if (!res.ok) return { error: "Failed to propose a viewing time" };
+    if (!res.ok) {
+      return { error: await readViewingError(res, "Couldn't propose a viewing time. Please try again.") };
+    }
     return {};
   } catch {
     return { error: "Failed to propose a viewing time" };
@@ -421,7 +456,9 @@ export async function respondToViewing(
         body: JSON.stringify({ action }),
       }
     );
-    if (!res.ok) return { error: "Failed to respond to the viewing proposal" };
+    if (!res.ok) {
+      return { error: await readViewingError(res, "Couldn't respond to the viewing proposal. Please try again.") };
+    }
     return {};
   } catch {
     return { error: "Failed to respond to the viewing proposal" };
