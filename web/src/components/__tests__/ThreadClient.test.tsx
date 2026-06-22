@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -7,6 +7,8 @@ import userEvent from "@testing-library/user-event";
 const mockFetchMessages = vi.fn();
 const mockSendMessage = vi.fn();
 const mockCreateCheckoutSession = vi.fn();
+const mockProposeViewing = vi.fn();
+const mockRespondToViewing = vi.fn();
 const mockCalculateMatchFee = vi.fn((cents: number) =>
   cents < 100000 ? 2900 : cents < 200000 ? 4900 : 7900
 );
@@ -16,6 +18,8 @@ vi.mock("@/lib/actions", () => ({
   fetchMessages: (...args: unknown[]) => mockFetchMessages(...args),
   sendMessage: (...args: unknown[]) => mockSendMessage(...args),
   createCheckoutSession: (...args: unknown[]) => mockCreateCheckoutSession(...args),
+  proposeViewing: (...args: unknown[]) => mockProposeViewing(...args),
+  respondToViewing: (...args: unknown[]) => mockRespondToViewing(...args),
 }));
 
 vi.mock("@/lib/fees", () => ({
@@ -44,8 +48,8 @@ const MY_ID = "user-lister-1";
 const OTHER_ID = "user-renter-1";
 
 const baseMessages = [
-  { id: "m1", conversation_id: "c1", sender_id: OTHER_ID, body: "Hey, is it available?", created_at: "2026-06-01T10:00:00Z" },
-  { id: "m2", conversation_id: "c1", sender_id: MY_ID,    body: "Yes, from July 1st.",    created_at: "2026-06-01T10:01:00Z" },
+  { id: "m1", conversation_id: "c1", sender_id: OTHER_ID, body: "Hey, is it available?", created_at: "2026-06-01T10:00:00Z", kind: "text" as const },
+  { id: "m2", conversation_id: "c1", sender_id: MY_ID,    body: "Yes, from July 1st.",    created_at: "2026-06-01T10:01:00Z", kind: "text" as const },
 ];
 
 const defaultProps = {
@@ -62,6 +66,8 @@ beforeEach(() => {
   mockFetchMessages.mockResolvedValue(baseMessages);
   mockSendMessage.mockResolvedValue({});
   mockCreateCheckoutSession.mockResolvedValue({ url: "https://checkout.stripe.com/test" });
+  mockProposeViewing.mockResolvedValue({});
+  mockRespondToViewing.mockResolvedValue({});
   // Only fake setInterval so userEvent's internal setTimeout still works
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
 });
@@ -148,7 +154,7 @@ describe("message input", () => {
   });
 
   it("refreshes messages after sending", async () => {
-    const newMessages = [...baseMessages, { id: "m3", conversation_id: "c1", sender_id: MY_ID, body: "New message", created_at: "2026-06-01T10:02:00Z" }];
+    const newMessages = [...baseMessages, { id: "m3", conversation_id: "c1", sender_id: MY_ID, body: "New message", created_at: "2026-06-01T10:02:00Z", kind: "text" as const }];
     mockFetchMessages.mockResolvedValueOnce(newMessages);
     render(<ThreadClient {...defaultProps} />);
     const textarea = screen.getByPlaceholderText(/type a message/i);
@@ -302,4 +308,153 @@ describe("confirmed state", () => {
     expect(screen.queryByText(/no payment or action is needed/i)).not.toBeInTheDocument();
   });
 
+});
+
+// ── Viewing scheduler ─────────────────────────────────────────────────────────
+
+describe("propose-a-time button", () => {
+  it("is enabled when conversation is not confirmed", () => {
+    render(<ThreadClient {...defaultProps} confirmedAt={null} />);
+    expect(screen.getByRole("button", { name: /propose a time/i })).not.toBeDisabled();
+  });
+
+  it("is disabled when conversation is confirmed", () => {
+    render(<ThreadClient {...defaultProps} confirmedAt="2026-06-02T12:00:00Z" />);
+    expect(screen.getByRole("button", { name: /propose a time/i })).toBeDisabled();
+  });
+
+  it("opens the ProposeViewingModal on click", async () => {
+    render(<ThreadClient {...defaultProps} confirmedAt={null} />);
+    await userEvent.click(screen.getByRole("button", { name: /propose a time/i }));
+    expect(screen.getByText(/propose a viewing time/i)).toBeInTheDocument();
+  });
+
+  it("closes the modal on Cancel", async () => {
+    render(<ThreadClient {...defaultProps} confirmedAt={null} />);
+    await userEvent.click(screen.getByRole("button", { name: /propose a time/i }));
+    await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(screen.queryByText(/propose a viewing time/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("submitting a viewing proposal", () => {
+  async function openModalAndSubmit(proposedAt = "2026-07-05T18:30") {
+    await userEvent.click(screen.getByRole("button", { name: /propose a time/i }));
+    fireEvent.change(screen.getByLabelText(/date & time/i), { target: { value: proposedAt } });
+    const heading = screen.getByText(/propose a viewing time/i);
+    const modal = heading.closest("div.fixed") as HTMLElement;
+    await userEvent.click(within(modal).getByRole("button", { name: /^send$/i }));
+  }
+
+  it("calls proposeViewing with the conversation id and ISO datetime", async () => {
+    render(<ThreadClient {...defaultProps} confirmedAt={null} />);
+    await openModalAndSubmit();
+    await waitFor(() => expect(mockProposeViewing).toHaveBeenCalled());
+    const [convId, isoArg] = mockProposeViewing.mock.calls[0];
+    expect(convId).toBe("c1");
+    expect(isoArg).toBe(new Date("2026-07-05T18:30").toISOString());
+  });
+
+  it("closes the modal and refreshes messages on success", async () => {
+    const withProposal = [
+      ...baseMessages,
+      {
+        id: "m3",
+        conversation_id: "c1",
+        sender_id: MY_ID,
+        body: "Proposed viewing: 2026-07-05 18:30 UTC",
+        created_at: "2026-06-01T10:02:00Z",
+        kind: "viewing_proposal" as const,
+        viewing: {
+          proposed_at: "2026-07-05T18:30:00Z",
+          status: "pending" as const,
+          responded_at: null,
+          responder_id: null,
+        },
+      },
+    ];
+    mockFetchMessages.mockResolvedValueOnce(withProposal);
+    render(<ThreadClient {...defaultProps} confirmedAt={null} />);
+    await openModalAndSubmit();
+    await waitFor(() => expect(screen.queryByText(/propose a viewing time/i)).not.toBeInTheDocument());
+    expect(mockFetchMessages).toHaveBeenCalled();
+  });
+
+  it("keeps the modal open and shows an error message when proposeViewing fails", async () => {
+    mockProposeViewing.mockResolvedValueOnce({ error: "conversation_confirmed" });
+    render(<ThreadClient {...defaultProps} confirmedAt={null} />);
+    const callsBefore = mockFetchMessages.mock.calls.length;
+    await openModalAndSubmit();
+    await waitFor(() => expect(mockProposeViewing).toHaveBeenCalled());
+    // The modal stays open and the user now sees an error message instead of
+    // silent failure, and messages are not refetched since nothing changed.
+    expect(screen.getByText(/propose a viewing time/i)).toBeInTheDocument();
+    expect(screen.getByText(/conversation_confirmed/i)).toBeInTheDocument();
+    expect(mockFetchMessages.mock.calls.length).toBe(callsBefore);
+  });
+});
+
+describe("viewing_proposal message rendering", () => {
+  const proposalMessage = {
+    id: "m3",
+    conversation_id: "c1",
+    sender_id: OTHER_ID,
+    body: "Proposed viewing: 2026-07-05 18:30 UTC",
+    created_at: "2026-06-01T10:02:00Z",
+    kind: "viewing_proposal" as const,
+    viewing: {
+      proposed_at: "2026-07-05T18:30:00Z",
+      status: "pending" as const,
+      responded_at: null,
+      responder_id: null,
+    },
+  };
+
+  it("renders a ViewingProposalCard instead of a plain text bubble", () => {
+    render(<ThreadClient {...defaultProps} initialMessages={[...baseMessages, proposalMessage]} />);
+    expect(screen.getByText(/viewing proposal/i)).toBeInTheDocument();
+  });
+
+  it("shows Accept/Decline for the recipient and calls respondToViewing on Accept", async () => {
+    render(<ThreadClient {...defaultProps} initialMessages={[...baseMessages, proposalMessage]} currentUserId={MY_ID} />);
+    await userEvent.click(screen.getByRole("button", { name: /accept/i }));
+    await waitFor(() =>
+      expect(mockRespondToViewing).toHaveBeenCalledWith("c1", proposalMessage.id, "accept")
+    );
+  });
+
+  it("calls respondToViewing with 'decline' on Decline", async () => {
+    render(<ThreadClient {...defaultProps} initialMessages={[...baseMessages, proposalMessage]} currentUserId={MY_ID} />);
+    await userEvent.click(screen.getByRole("button", { name: /decline/i }));
+    await waitFor(() =>
+      expect(mockRespondToViewing).toHaveBeenCalledWith("c1", proposalMessage.id, "decline")
+    );
+  });
+
+  it("refreshes messages after a successful respond", async () => {
+    render(<ThreadClient {...defaultProps} initialMessages={[...baseMessages, proposalMessage]} currentUserId={MY_ID} />);
+    const callsBefore = mockFetchMessages.mock.calls.length;
+    await userEvent.click(screen.getByRole("button", { name: /accept/i }));
+    await waitFor(() => expect(mockFetchMessages.mock.calls.length).toBeGreaterThan(callsBefore));
+  });
+
+  it("refreshes messages and shows an error message when respond fails", async () => {
+    mockRespondToViewing.mockResolvedValueOnce({ error: "proposal_not_pending" });
+    render(<ThreadClient {...defaultProps} initialMessages={[...baseMessages, proposalMessage]} currentUserId={MY_ID} />);
+    const callsBefore = mockFetchMessages.mock.calls.length;
+    await userEvent.click(screen.getByRole("button", { name: /accept/i }));
+    await waitFor(() => expect(mockRespondToViewing).toHaveBeenCalled());
+    // On failure (e.g. someone else already responded), the component
+    // re-fetches messages so the UI reflects the true server-side state, and
+    // the user sees an error message instead of silent failure.
+    await waitFor(() => expect(mockFetchMessages.mock.calls.length).toBeGreaterThan(callsBefore));
+    expect(screen.getByText(/proposal_not_pending/i)).toBeInTheDocument();
+  });
+
+  it("shows waiting text instead of buttons when I am the sender", () => {
+    const mine = { ...proposalMessage, sender_id: MY_ID };
+    render(<ThreadClient {...defaultProps} initialMessages={[...baseMessages, mine]} currentUserId={MY_ID} />);
+    expect(screen.getByText(/waiting for the other party to respond/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /accept/i })).not.toBeInTheDocument();
+  });
 });

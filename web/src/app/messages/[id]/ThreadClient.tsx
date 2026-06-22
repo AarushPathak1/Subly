@@ -5,10 +5,14 @@ import {
   fetchMessages,
   sendMessage,
   createCheckoutSession,
+  proposeViewing,
+  respondToViewing,
   type ChatMessage,
 } from "@/lib/actions";
 import { calculateMatchFee } from "@/lib/fees";
 import { capture } from "@/lib/posthog/client";
+import { ProposeViewingModal } from "./ProposeViewingModal";
+import { ViewingProposalCard } from "./ViewingProposalCard";
 
 interface ThreadClientProps {
   conversationId: string;
@@ -17,6 +21,7 @@ interface ThreadClientProps {
   confirmedAt: string | null;
   initialRentCents: number;
   initialMessages: ChatMessage[];
+  listingTitle?: string;
 }
 
 export function ThreadClient({
@@ -26,6 +31,7 @@ export function ThreadClient({
   confirmedAt: initialConfirmedAt,
   initialRentCents,
   initialMessages,
+  listingTitle = "",
 }: ThreadClientProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState("");
@@ -33,6 +39,10 @@ export function ThreadClient({
   const [confirmedAt, setConfirmedAt] = useState(initialConfirmedAt);
   const [showConfirmPanel, setShowConfirmPanel] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [showProposeModal, setShowProposeModal] = useState(false);
+  const [proposing, setProposing] = useState(false);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [viewingError, setViewingError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const isConfirmed = !!confirmedAt;
@@ -86,6 +96,37 @@ export function ThreadClient({
       return;
     }
     window.location.href = result.url;
+  };
+
+  const handlePropose = async (proposedAtISO: string, note?: string) => {
+    if (proposing) return;
+    setProposing(true);
+    setViewingError(null);
+    const { error } = await proposeViewing(conversationId, proposedAtISO, note);
+    if (!error) {
+      setShowProposeModal(false);
+      const updated = await fetchMessages(conversationId);
+      setMessages(updated);
+    } else {
+      setViewingError(error);
+    }
+    setProposing(false);
+  };
+
+  const handleRespond = async (messageId: string, action: "accept" | "decline") => {
+    if (respondingId) return;
+    setRespondingId(messageId);
+    setViewingError(null);
+    const { error } = await respondToViewing(conversationId, messageId, action);
+    if (!error) {
+      const updated = await fetchMessages(conversationId);
+      setMessages(updated);
+    } else {
+      setViewingError(error);
+      const updated = await fetchMessages(conversationId);
+      setMessages(updated);
+    }
+    setRespondingId(null);
   };
 
   return (
@@ -161,6 +202,12 @@ export function ThreadClient({
         </div>
       )}
 
+      {viewingError && (
+        <div className="flex items-start gap-2 px-5 py-2.5 bg-red-50 border-b border-red-200">
+          <p className="text-xs text-red-600">{viewingError}</p>
+        </div>
+      )}
+
       {/* Message list */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
         {messages.length === 0 && (
@@ -168,6 +215,21 @@ export function ThreadClient({
         )}
         {messages.map((msg) => {
           const isMine = msg.sender_id === currentUserId;
+
+          if (msg.kind === "viewing_proposal") {
+            return (
+              <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
+                <ViewingProposalCard
+                  message={msg}
+                  currentUserId={currentUserId}
+                  listingTitle={listingTitle}
+                  onRespond={handleRespond}
+                  responding={respondingId === msg.id}
+                />
+              </div>
+            );
+          }
+
           return (
             <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
               <div
@@ -190,6 +252,19 @@ export function ThreadClient({
 
       {/* Input bar */}
       <div className="border-t border-slate-200 bg-white px-4 py-3 flex items-end gap-3">
+        <button
+          type="button"
+          onClick={() => setShowProposeModal(true)}
+          disabled={isConfirmed}
+          aria-label="Propose a time"
+          title="Propose a time"
+          className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+        >
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+            <rect x="2" y="3" width="12" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M2 6.5h12M5 1.5v3M11 1.5v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        </button>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -206,6 +281,14 @@ export function ThreadClient({
           {sending ? "…" : "Send"}
         </button>
       </div>
+
+      {showProposeModal && (
+        <ProposeViewingModal
+          onSubmit={handlePropose}
+          onCancel={() => setShowProposeModal(false)}
+          submitting={proposing}
+        />
+      )}
     </div>
   );
 }

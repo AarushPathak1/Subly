@@ -80,10 +80,26 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
     sender_id       UUID REFERENCES users(id) ON DELETE CASCADE,
     body            TEXT NOT NULL,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    kind            TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'viewing_proposal')),
+    -- JSONB payload for viewing proposals. NULL for text messages.
+    -- Shape: {
+    --   "proposed_at":     "2026-07-05T18:30:00Z",    -- ISO-8601 UTC, required
+    --   "status":          "pending" | "accepted" | "declined" | "superseded",
+    --   "responded_at":    "2026-07-04T12:05:00Z" | null,
+    --   "responder_id":    "<uuid>" | null,
+    --   "note":            "<= 280 chars, optional"
+    -- }
+    viewing         JSONB CHECK (
+        (kind = 'text' AND viewing IS NULL) OR
+        (kind = 'viewing_proposal' AND viewing IS NOT NULL)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS messages_conv_created_idx ON messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS messages_conv_pending_viewings_idx
+    ON messages(conversation_id)
+    WHERE kind = 'viewing_proposal' AND (viewing->>'status') = 'pending';
 
 -- ─── Trigger: updated_at ────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION set_updated_at()

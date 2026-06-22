@@ -58,6 +58,7 @@ export default async function ThreadPage({ params }: { params: { id: string } })
             confirmedAt={conversation.confirmed_at ?? null}
             initialRentCents={conversation.initial_rent_cents}
             initialMessages={messages}
+            listingTitle={conversation.listing_title}
           />
         </div>
       </div>

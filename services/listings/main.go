@@ -66,11 +66,22 @@ type UserProfile struct {
 }
 
 type Message struct {
-	ID             string    `json:"id"`
-	ConversationID string    `json:"conversation_id"`
-	SenderID       string    `json:"sender_id"`
-	Body           string    `json:"body"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string          `json:"id"`
+	ConversationID string          `json:"conversation_id"`
+	SenderID       string          `json:"sender_id"`
+	Body           string          `json:"body"`
+	CreatedAt      time.Time       `json:"created_at"`
+	Kind           string          `json:"kind"`
+	Viewing        json.RawMessage `json:"viewing,omitempty"`
+}
+
+// ViewingPayload mirrors the JSON shape stored in messages.viewing.
+type ViewingPayload struct {
+	ProposedAt  time.Time  `json:"proposed_at"`
+	Status      string     `json:"status"`
+	RespondedAt *time.Time `json:"responded_at"`
+	ResponderID *string    `json:"responder_id"`
+	Note        string     `json:"note,omitempty"`
 }
 
 type Review struct {
@@ -136,6 +147,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /conversations/{id}", s.handleGetConversation)
 	mux.HandleFunc("GET /conversations/{id}/messages", s.handleGetMessages)
 	mux.HandleFunc("POST /conversations/{id}/messages", s.handleSendMessage)
+	mux.HandleFunc("POST /conversations/{id}/viewings", s.handleProposeViewing)
+	mux.HandleFunc("POST /conversations/{id}/viewings/{message_id}/respond", s.handleRespondViewing)
 	mux.HandleFunc("POST /conversations/{id}/confirm", s.handleConfirmConversation)
 	mux.HandleFunc("GET /users/{id}/profile", s.handleGetUserProfile)
 	mux.HandleFunc("POST /reviews", s.handleCreateReview)
@@ -563,7 +576,7 @@ func (s *server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	s.db.Exec(ctx, fmt.Sprintf(`UPDATE conversations SET %s = NOW() WHERE id = $1`, col), id)
 
 	rows, err := s.db.Query(ctx,
-		`SELECT id, conversation_id, sender_id, body, created_at
+		`SELECT id, conversation_id, sender_id, body, created_at, kind, viewing
 		 FROM messages WHERE conversation_id = $1
 		 ORDER BY created_at ASC LIMIT 100`, id)
 	if err != nil {
@@ -575,9 +588,13 @@ func (s *server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	msgs := make([]Message, 0)
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Body, &m.CreatedAt); err != nil {
+		var viewing []byte
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Body, &m.CreatedAt, &m.Kind, &viewing); err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
+		}
+		if viewing != nil {
+			m.Viewing = json.RawMessage(viewing)
 		}
 		msgs = append(msgs, m)
 	}
@@ -628,10 +645,10 @@ func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	var msg Message
 	err = tx.QueryRow(ctx,
-		`INSERT INTO messages (conversation_id, sender_id, body)
-		 VALUES ($1, $2, $3) RETURNING id, conversation_id, sender_id, body, created_at`,
+		`INSERT INTO messages (conversation_id, sender_id, body, kind)
+		 VALUES ($1, $2, $3, 'text') RETURNING id, conversation_id, sender_id, body, created_at, kind`,
 		id, userID, strings.TrimSpace(body.Body),
-	).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Body, &msg.CreatedAt)
+	).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Body, &msg.CreatedAt, &msg.Kind)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, err)
 		return
@@ -659,6 +676,211 @@ func (s *server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusCreated, msg)
+}
+
+func (s *server) handleProposeViewing(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	var body struct {
+		ProposedAt string `json:"proposed_at"`
+		Note       string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_proposed_at"})
+		return
+	}
+	proposedAt, err := time.Parse(time.RFC3339, body.ProposedAt)
+	if err != nil || proposedAt.Before(time.Now().Add(-5*time.Minute)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_proposed_at"})
+		return
+	}
+	note := strings.TrimSpace(body.Note)
+	if len([]rune(note)) > 280 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "note_too_long"})
+		return
+	}
+	ctx := r.Context()
+
+	var renterID, listerID, listingTitle string
+	var confirmedAt *time.Time
+	err = s.db.QueryRow(ctx, `
+		SELECT c.renter_id, c.lister_id, l.title, c.confirmed_at
+		FROM conversations c
+		JOIN listings l ON l.id = c.listing_id
+		WHERE c.id = $1`, id).Scan(&renterID, &listerID, &listingTitle, &confirmedAt)
+	if err != nil {
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		return
+	}
+	if renterID != userID && listerID != userID {
+		writeErr(w, r, http.StatusForbidden, fmt.Errorf("access denied"))
+		return
+	}
+	if confirmedAt != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "conversation_confirmed"})
+		return
+	}
+
+	viewingPayload, _ := json.Marshal(ViewingPayload{
+		ProposedAt: proposedAt,
+		Status:     "pending",
+		Note:       note,
+	})
+	fallbackBody := fmt.Sprintf("Proposed viewing: %s", proposedAt.Local().Format("2006-01-02 15:04 MST"))
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, id); err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE messages SET viewing = jsonb_set(viewing, '{status}', '"superseded"')
+		WHERE conversation_id = $1 AND kind = 'viewing_proposal' AND viewing->>'status' = 'pending'`,
+		id); err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	var msg Message
+	var viewing []byte
+	err = tx.QueryRow(ctx,
+		`INSERT INTO messages (conversation_id, sender_id, body, kind, viewing)
+		 VALUES ($1, $2, $3, 'viewing_proposal', $4)
+		 RETURNING id, conversation_id, sender_id, body, created_at, kind, viewing`,
+		id, userID, fallbackBody, viewingPayload,
+	).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Body, &msg.CreatedAt, &msg.Kind, &viewing)
+	if err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+	if viewing != nil {
+		msg.Viewing = json.RawMessage(viewing)
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE conversations SET last_message_at = NOW() WHERE id = $1`, id); err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	recipientID := listerID
+	if userID == listerID {
+		recipientID = renterID
+	}
+	s.publishNotification("notifications.new_message", map[string]string{
+		"recipient_id":    recipientID,
+		"sender_id":       userID,
+		"listing_title":   listingTitle,
+		"conversation_id": id,
+	})
+
+	writeJSON(w, http.StatusCreated, msg)
+}
+
+func (s *server) handleRespondViewing(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	messageID := r.PathValue("message_id")
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	var body struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_action"})
+		return
+	}
+	var status string
+	switch body.Action {
+	case "accept":
+		status = "accepted"
+	case "decline":
+		status = "declined"
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_action"})
+		return
+	}
+	ctx := r.Context()
+
+	var renterID, listerID string
+	err := s.db.QueryRow(ctx, `SELECT renter_id, lister_id FROM conversations WHERE id = $1`, id).Scan(&renterID, &listerID)
+	if err != nil {
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		return
+	}
+	if renterID != userID && listerID != userID {
+		writeErr(w, r, http.StatusForbidden, fmt.Errorf("access denied"))
+		return
+	}
+
+	var msg Message
+	var viewing []byte
+	err = s.db.QueryRow(ctx, `
+		WITH updated AS (
+		    UPDATE messages
+		       SET viewing = viewing || jsonb_build_object(
+		             'status', $3::text, 'responded_at', to_jsonb(NOW()), 'responder_id', to_jsonb($4::uuid))
+		     WHERE id = $1 AND conversation_id = $2 AND kind = 'viewing_proposal'
+		       AND sender_id <> $4 AND viewing->>'status' = 'pending'
+		     RETURNING id, conversation_id, sender_id, body, created_at, kind, viewing
+		)
+		SELECT * FROM updated`,
+		messageID, id, status, userID,
+	).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Body, &msg.CreatedAt, &msg.Kind, &viewing)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			writeErr(w, r, http.StatusInternalServerError, err)
+			return
+		}
+		// Disambiguate why zero rows were updated.
+		var senderID, existingStatus string
+		lookupErr := s.db.QueryRow(ctx, `
+			SELECT sender_id, COALESCE(viewing->>'status', '')
+			FROM messages WHERE id = $1 AND conversation_id = $2 AND kind = 'viewing_proposal'`,
+			messageID, id,
+		).Scan(&senderID, &existingStatus)
+		if lookupErr != nil {
+			writeErr(w, r, http.StatusNotFound, fmt.Errorf("viewing proposal not found"))
+			return
+		}
+		if senderID == userID {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot_respond_to_own_proposal"})
+			return
+		}
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "proposal_not_pending"})
+		return
+	}
+	if viewing != nil {
+		msg.Viewing = json.RawMessage(viewing)
+	}
+
+	recipientID := msg.SenderID
+	s.publishNotification("notifications.viewing_responded", map[string]string{
+		"recipient_id":    recipientID,
+		"responder_id":    userID,
+		"conversation_id": id,
+		"message_id":      msg.ID,
+		"status":          status,
+	})
+
+	writeJSON(w, http.StatusOK, msg)
 }
 
 func (s *server) handleConfirmConversation(w http.ResponseWriter, r *http.Request) {
@@ -1205,6 +1427,7 @@ func main() {
 		mqCh.QueueDeclare("notifications.new_message", true, false, false, false, nil)
 		mqCh.QueueDeclare("notifications.match_confirmed", true, false, false, false, nil)
 		mqCh.QueueDeclare("notifications.listing_expired", true, false, false, false, nil)
+		mqCh.QueueDeclare("notifications.viewing_responded", true, false, false, false, nil)
 		defer mqConn.Close()
 	}
 

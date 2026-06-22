@@ -301,12 +301,24 @@ export async function verifyAndConfirmMatch(
   return {};
 }
 
+export type ViewingStatus = "pending" | "accepted" | "declined" | "superseded";
+
+export interface ViewingPayload {
+  proposed_at: string;
+  status: ViewingStatus;
+  responded_at: string | null;
+  responder_id: string | null;
+  note?: string;
+}
+
 export interface ChatMessage {
   id: string;
   conversation_id: string;
   sender_id: string;
   body: string;
   created_at: string;
+  kind: "text" | "viewing_proposal";
+  viewing?: ViewingPayload | null;
 }
 
 export async function startConversation(listingId: string): Promise<void> {
@@ -370,6 +382,49 @@ export async function sendMessage(
     return {};
   } catch {
     return { error: "Failed to send message" };
+  }
+}
+
+export async function proposeViewing(
+  conversationId: string,
+  proposedAt: string,
+  note?: string
+): Promise<{ error?: string }> {
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+  try {
+    const res = await fetch(`${GATEWAY}/api/messages/conversations/${conversationId}/viewings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ proposed_at: proposedAt, note }),
+    });
+    if (!res.ok) return { error: "Failed to propose a viewing time" };
+    return {};
+  } catch {
+    return { error: "Failed to propose a viewing time" };
+  }
+}
+
+export async function respondToViewing(
+  conversationId: string,
+  messageId: string,
+  action: "accept" | "decline"
+): Promise<{ error?: string }> {
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+  try {
+    const res = await fetch(
+      `${GATEWAY}/api/messages/conversations/${conversationId}/viewings/${messageId}/respond`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action }),
+      }
+    );
+    if (!res.ok) return { error: "Failed to respond to the viewing proposal" };
+    return {};
+  } catch {
+    return { error: "Failed to respond to the viewing proposal" };
   }
 }
 
