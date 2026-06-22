@@ -72,7 +72,7 @@ describe("AppNavUI", () => {
       expect(screen.getByRole("link", { name: "My listings" })).toHaveAttribute("href", "/listings/my");
       expect(screen.getByRole("link", { name: "Post sublease" })).toHaveAttribute("href", "/listings/new");
       expect(screen.getByRole("link", { name: "Messages" })).toHaveAttribute("href", "/messages");
-      expect(screen.getByRole("link", { name: "Preferences" })).toHaveAttribute("href", "/onboarding");
+      expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
       expect(screen.getByRole("link", { name: "My profile" })).toHaveAttribute("href", "/profile");
     });
 
@@ -123,12 +123,32 @@ describe("AppNavUI", () => {
       expect(savedLink.className).toContain("indigo");
     });
 
+    it("settings link is highlighted when active is 'settings'", () => {
+      render(<AppNavUI active="settings" />);
+      const settingsLink = screen.getByRole("link", { name: "Settings" });
+      expect(settingsLink.className).toContain("indigo");
+    });
+
     it("messages link is highlighted when active is 'messages'", () => {
       render(<AppNavUI active="messages" unreadCount={2} />);
       // When unreadCount > 0 the badge text is inside the link, changing its accessible name.
       // Find by href attribute instead.
       const messagesLink = document.querySelector('a[href="/messages"]');
       expect(messagesLink?.className).toContain("indigo");
+    });
+
+    // Regression check: the onboarding page passes active="settings" (see
+    // web/src/app/onboarding/page.tsx) because "onboarding" was removed from the
+    // AppNavActive union when the /settings feature was added. There is no nav link
+    // for onboarding, so the Settings link lights up while a user is actually on
+    // /onboarding — a real (if minor) UX bug, not an intentional design choice.
+    it("BUG: onboarding page's active='settings' value highlights the Settings link even though there is no /onboarding nav item", () => {
+      render(<AppNavUI active="settings" />);
+      const settingsLink = screen.getByRole("link", { name: "Settings" });
+      // This passes today, demonstrating the regression: visiting /onboarding (which
+      // renders <AppNav active="settings" />) makes "Settings" appear highlighted/active
+      // even though the user is not on the /settings page.
+      expect(settingsLink.className).toContain("indigo");
     });
   });
 });

@@ -14,6 +14,7 @@ export const VibeProfileSchema = z.object({
     message: "Please enter a valid rent budget",
   }),
   min_bedrooms: z.string().min(1),
+  mode: z.enum(["onboarding", "settings"]).optional().default("onboarding"),
 });
 
 export const ListingSchema = z.object({

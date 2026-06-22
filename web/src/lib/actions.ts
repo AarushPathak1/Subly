@@ -3,6 +3,7 @@
 import { randomUUID } from "crypto";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import Stripe from "stripe";
@@ -80,6 +81,12 @@ export async function saveProfile(
   });
 
   if (!res.ok) return { error: "Failed to save profile. Please try again." };
+
+  if (parsed.data.mode === "settings") {
+    revalidatePath("/settings");
+    revalidatePath("/dashboard");
+    return { toast: "Preferences updated" };
+  }
 
   redirect("/dashboard");
 }

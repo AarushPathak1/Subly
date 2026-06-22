@@ -2,7 +2,7 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { SublyLogo } from "./SublyLogo";
 
-export type AppNavActive = "dashboard" | "browse" | "saved" | "my-listings" | "new-listing" | "onboarding" | "messages" | "profile";
+export type AppNavActive = "dashboard" | "browse" | "saved" | "my-listings" | "new-listing" | "settings" | "messages" | "profile";
 
 export interface AppNavUIProps {
   active?: AppNavActive;
@@ -55,8 +55,8 @@ export function AppNavUI({ active, unreadCount = 0 }: AppNavUIProps) {
               </span>
             )}
           </Link>
-          <Link href="/onboarding" className={`text-sm font-medium transition ${active === "onboarding" ? "text-indigo-400" : "text-slate-400 hover:text-white"}`}>
-            Preferences
+          <Link href="/settings" className={`text-sm font-medium transition ${active === "settings" ? "text-indigo-400" : "text-slate-400 hover:text-white"}`}>
+            Settings
           </Link>
           <Link href="/profile" className={`text-sm font-medium transition ${active === "profile" ? "text-indigo-400" : "text-slate-400 hover:text-white"}`}>
             My profile

@@ -36,11 +36,21 @@ interface Existing {
   min_bedrooms: string;
 }
 
-export default function VibeForm({ university, existing }: { university: string; existing?: Existing }) {
+export default function VibeForm({
+  university,
+  existing,
+  mode = "onboarding",
+}: {
+  university: string;
+  existing?: Existing;
+  mode?: "onboarding" | "settings";
+}) {
   const [state, action] = useFormState(saveProfile, null);
+  const isEditing = mode === "settings" || !!existing;
 
   return (
     <form action={action} className="space-y-6">
+      <input type="hidden" name="mode" value={mode} />
       <div>
         <label className={labelCls}>
           Describe your ideal place{" "}
@@ -107,7 +117,17 @@ export default function VibeForm({ university, existing }: { university: string;
         </div>
       )}
 
-      <SubmitButton isEditing={!!existing} />
+      {state && "toast" in state && (
+        <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="mt-0.5 shrink-0">
+            <circle cx="8" cy="8" r="7" stroke="#10b981" strokeWidth="1.5" />
+            <path d="M5.5 8.2l1.8 1.8 3.2-3.7" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <p className="text-sm text-emerald-700">{state.toast}</p>
+        </div>
+      )}
+
+      <SubmitButton isEditing={isEditing} />
     </form>
   );
 }
