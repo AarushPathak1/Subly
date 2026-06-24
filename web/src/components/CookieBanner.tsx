@@ -32,7 +32,7 @@ export function CookieBanner() {
       <div className="max-w-2xl mx-auto bg-white border border-slate-200 rounded-2xl shadow-xl p-5 flex flex-col sm:flex-row gap-4 items-start sm:items-center">
         <div className="flex-1 min-w-0">
           <p className="text-sm text-slate-700">
-            We use essential cookies to keep you signed in. That&apos;s it, no tracking.{" "}
+            We use essential cookies to keep you signed in, plus one optional analytics cookie (PostHog) to improve the product. Decline to opt out of analytics — essential cookies always stay on.{" "}
             <Link href="/cookies" className="text-indigo-600 hover:underline font-medium">
               Cookie Policy
             </Link>
