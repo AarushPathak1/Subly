@@ -24,6 +24,7 @@ interface Listing {
   images: string[];
   status: string;
   scam_score: number;
+  view_count: number;
   created_at: string;
 }
 

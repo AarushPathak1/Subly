@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS listings (
     status          listing_status DEFAULT 'draft',
     embedding_id    TEXT,                     -- Pinecone vector ID
     scam_score      NUMERIC(4,3) DEFAULT 0,   -- 0.000–1.000
+    view_count      INT NOT NULL DEFAULT 0,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW()
 );

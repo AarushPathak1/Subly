@@ -39,6 +39,7 @@ type Listing struct {
 	Images         []string  `json:"images"`
 	Status         string    `json:"status"`
 	ScamScore      float64   `json:"scam_score"`
+	ViewCount      int       `json:"view_count"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -175,7 +176,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	const selectCols = `SELECT id, user_id, title, description, address, university_near,
 	              rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
-	              amenities, images, status, scam_score, created_at, updated_at
+	              amenities, images, status, scam_score, view_count, created_at, updated_at
 	              FROM listings`
 
 	userID := r.URL.Query().Get("user_id")
@@ -209,7 +210,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&l.ID, &l.UserID, &l.Title, &description, &l.Address,
 			&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
 			&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
-			&l.Status, &l.ScamScore, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
@@ -267,23 +268,42 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
 	var l Listing
 	var description, universityNear, availableTo sql.NullString
 	err := s.db.QueryRow(r.Context(),
-		`SELECT id, user_id, title, description, address, university_near,
-		        rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
-		        amenities, images, status, scam_score, created_at, updated_at
-		 FROM listings WHERE id = $1`, id,
+		`WITH bumped AS (
+		    UPDATE listings
+		       SET view_count = view_count + 1
+		     WHERE id = $1
+		       AND user_id <> $2
+		       AND status NOT IN ('draft', 'expired')
+		    RETURNING id, user_id, title, description, address, university_near,
+		              rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
+		              amenities, images, status, scam_score, view_count, created_at, updated_at
+		)
+		SELECT * FROM bumped
+		UNION ALL
+		SELECT id, user_id, title, description, address, university_near,
+		       rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
+		       amenities, images, status, scam_score, view_count, created_at, updated_at
+		  FROM listings
+		 WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM bumped)
+		 LIMIT 1`, id, userID,
 	).Scan(&l.ID, &l.UserID, &l.Title, &description, &l.Address,
 		&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
 		&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
-		&l.Status, &l.ScamScore, &l.CreatedAt, &l.UpdatedAt)
+		&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt)
 	if err != nil {
 		writeErr(w, r, http.StatusNotFound, err)
 		return
 	}
 	l.Description, l.UniversityNear, l.AvailableTo = description.String, universityNear.String, availableTo.String
-	if r.Header.Get("X-User-ID") != l.UserID {
+	if userID != l.UserID {
 		l.ScamScore = 0
 	}
 	writeJSON(w, http.StatusOK, l)
@@ -1245,7 +1265,7 @@ func (s *server) handleListSaved(w http.ResponseWriter, r *http.Request) {
 		SELECT l.id, l.user_id, l.title, l.description, l.address, l.university_near,
 		       l.rent_cents, l.available_from::text, l.available_to::text,
 		       l.bedrooms, l.bathrooms, l.amenities, l.images,
-		       l.status, l.scam_score, l.created_at, l.updated_at, sl.created_at
+		       l.status, l.scam_score, l.view_count, l.created_at, l.updated_at, sl.created_at
 		FROM saved_listings sl
 		JOIN listings l ON l.id = sl.listing_id
 		WHERE sl.user_id = $1
@@ -1264,7 +1284,7 @@ func (s *server) handleListSaved(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&sl.ID, &sl.UserID, &sl.Title, &description, &sl.Address,
 			&universityNear, &sl.RentCents, &sl.AvailableFrom, &availableTo,
 			&sl.Bedrooms, &sl.Bathrooms, &sl.Amenities, &sl.Images,
-			&sl.Status, &sl.ScamScore, &sl.CreatedAt, &sl.UpdatedAt, &sl.SavedAt); err != nil {
+			&sl.Status, &sl.ScamScore, &sl.ViewCount, &sl.CreatedAt, &sl.UpdatedAt, &sl.SavedAt); err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}

@@ -163,6 +163,7 @@ func TestIntegration_CreateAndGetListing(t *testing.T) {
 	// Get the listing back
 	getReq := httptest.NewRequest(http.MethodGet, "/listings/"+id, nil)
 	getReq.SetPathValue("id", id)
+	getReq.Header.Set("X-User-ID", testUserID)
 	gw := httptest.NewRecorder()
 	s.handleGet(gw, getReq)
 
@@ -206,6 +207,7 @@ func TestIntegration_GetListing_NullableColumns(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/listings/"+listingID, nil)
 	req.SetPathValue("id", listingID)
+	req.Header.Set("X-User-ID", testUserID)
 	w := httptest.NewRecorder()
 	s.handleGet(w, req)
 

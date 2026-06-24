@@ -18,6 +18,7 @@ interface Listing {
   images: string[];
   scam_score: number;
   status: string;
+  view_count: number;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -80,7 +81,8 @@ function MyListingCard({ listing }: { listing: Listing }) {
         </div>
 
         <p className="text-sm font-bold text-slate-700 mb-1">{rent}</p>
-        <p className="text-xs text-slate-400 mb-4">{listing.bedrooms}bd · {listing.bathrooms}ba · {listing.university_near || listing.address}</p>
+        <p className="text-xs text-slate-400 mb-1">{listing.bedrooms}bd · {listing.bathrooms}ba · {listing.university_near || listing.address}</p>
+        <p className="text-xs text-slate-400 mb-4">{listing.view_count} {listing.view_count === 1 ? "view" : "views"}</p>
 
         {/* Actions */}
         {status !== "expired" && status !== "leased" && (

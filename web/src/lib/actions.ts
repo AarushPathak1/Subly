@@ -632,6 +632,7 @@ export interface SavedListing {
   images: string[];
   status: string;
   scam_score: number;
+  view_count: number;
   created_at: string;
   updated_at: string;
   saved_at: string;
