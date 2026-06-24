@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -653,6 +655,604 @@ func TestIntegration_ListPublicReviews_NullListingFallsBackToEmptyTitle(t *testi
 	}
 	if !found {
 		t.Error("expected review with NULL listing_id to still appear in public reviews")
+	}
+}
+
+// ── ListPublicReviews filters ─────────────────────────────────────────────────
+
+func TestIntegration_ListPublicReviews_FilterByListingID(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	convID := seedConfirmedConversation(t, db, listingID, testUserID, testListerID, 120000)
+
+	var reviewID string
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 5, 'Great listing', true) RETURNING id`,
+		testUserID, convID, listingID,
+	).Scan(&reviewID)
+	cleanupReview(t, db, reviewID)
+
+	listingID2 := seedTestListing(t, db, testListerID, 130000)
+	seedSecondUser(t, db, testRenterID, "renter2@university.edu")
+	convID2 := seedConfirmedConversation(t, db, listingID2, testRenterID, testListerID, 130000)
+	var otherReviewID string
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 4, 'Other listing', true) RETURNING id`,
+		testRenterID, convID2, listingID2,
+	).Scan(&otherReviewID)
+	cleanupReview(t, db, otherReviewID)
+
+	s := &server{db: db}
+	req := httptest.NewRequest(http.MethodGet, "/reviews?listing_id="+listingID, nil)
+	w := httptest.NewRecorder()
+	s.handleListPublicReviews(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var reviews []PublicReview
+	json.NewDecoder(w.Body).Decode(&reviews)
+	if len(reviews) != 1 || reviews[0].ID != reviewID {
+		t.Errorf("expected only the review for listingID, got %+v", reviews)
+	}
+}
+
+func TestIntegration_ListPublicReviews_FilterByListerID(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	listingID2 := seedTestListing(t, db, testListerID, 130000)
+	convID := seedConfirmedConversation(t, db, listingID, testUserID, testListerID, 120000)
+
+	seedSecondUser(t, db, testRenterID, "renter2@university.edu")
+	convID2 := seedConfirmedConversation(t, db, listingID2, testRenterID, testListerID, 130000)
+
+	var reviewID1, reviewID2 string
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 5, 'First listing of this lister', true) RETURNING id`,
+		testUserID, convID, listingID,
+	).Scan(&reviewID1)
+	cleanupReview(t, db, reviewID1)
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 3, 'Second listing of this lister', true) RETURNING id`,
+		testRenterID, convID2, listingID2,
+	).Scan(&reviewID2)
+	cleanupReview(t, db, reviewID2)
+
+	// A review on an unrelated lister's listing must not appear.
+	thirdListerID := "00000000-0000-0000-0000-000000000004"
+	seedSecondUser(t, db, thirdListerID, "thirdlister@university.edu")
+	listingID3 := seedTestListing(t, db, thirdListerID, 100000)
+	renterForThird := "00000000-0000-0000-0000-000000000005"
+	seedSecondUser(t, db, renterForThird, "renter3@university.edu")
+	convID3 := seedConfirmedConversation(t, db, listingID3, renterForThird, thirdListerID, 100000)
+	var unrelatedReviewID string
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 5, 'Unrelated lister', true) RETURNING id`,
+		renterForThird, convID3, listingID3,
+	).Scan(&unrelatedReviewID)
+	cleanupReview(t, db, unrelatedReviewID)
+
+	s := &server{db: db}
+	req := httptest.NewRequest(http.MethodGet, "/reviews?lister_id="+testListerID, nil)
+	w := httptest.NewRecorder()
+	s.handleListPublicReviews(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var reviews []PublicReview
+	json.NewDecoder(w.Body).Decode(&reviews)
+	if len(reviews) != 2 {
+		t.Fatalf("expected 2 reviews across the lister's listings, got %d: %+v", len(reviews), reviews)
+	}
+	for _, rv := range reviews {
+		if rv.ID == unrelatedReviewID {
+			t.Error("review on unrelated lister's listing should not appear")
+		}
+	}
+}
+
+func TestIntegration_ListPublicReviews_FilteredIncludesEmptyBody(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	convID := seedConfirmedConversation(t, db, listingID, testUserID, testListerID, 120000)
+
+	var emptyBodyID string
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 4, '', true) RETURNING id`,
+		testUserID, convID, listingID,
+	).Scan(&emptyBodyID)
+	cleanupReview(t, db, emptyBodyID)
+
+	s := &server{db: db}
+
+	reqByListing := httptest.NewRequest(http.MethodGet, "/reviews?listing_id="+listingID, nil)
+	wByListing := httptest.NewRecorder()
+	s.handleListPublicReviews(wByListing, reqByListing)
+	var byListing []PublicReview
+	json.NewDecoder(wByListing.Body).Decode(&byListing)
+	foundByListing := false
+	for _, rv := range byListing {
+		if rv.ID == emptyBodyID {
+			foundByListing = true
+		}
+	}
+	if !foundByListing {
+		t.Error("expected empty-body review to appear when filtering by listing_id")
+	}
+
+	reqByLister := httptest.NewRequest(http.MethodGet, "/reviews?lister_id="+testListerID, nil)
+	wByLister := httptest.NewRecorder()
+	s.handleListPublicReviews(wByLister, reqByLister)
+	var byLister []PublicReview
+	json.NewDecoder(wByLister.Body).Decode(&byLister)
+	foundByLister := false
+	for _, rv := range byLister {
+		if rv.ID == emptyBodyID {
+			foundByLister = true
+		}
+	}
+	if !foundByLister {
+		t.Error("expected empty-body review to appear when filtering by lister_id")
+	}
+}
+
+func TestHandleListPublicReviews_BothFiltersRejected(t *testing.T) {
+	s := &server{}
+	req := httptest.NewRequest(http.MethodGet,
+		"/reviews?listing_id=00000000-0000-0000-0000-000000000001&lister_id=00000000-0000-0000-0000-000000000002", nil)
+	w := httptest.NewRecorder()
+	s.handleListPublicReviews(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "specify listing_id or lister_id, not both" {
+		t.Errorf("unexpected error message: %q", resp["error"])
+	}
+}
+
+func TestHandleListPublicReviews_InvalidListingIDRejected(t *testing.T) {
+	s := &server{}
+	req := httptest.NewRequest(http.MethodGet, "/reviews?listing_id=not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	s.handleListPublicReviews(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "invalid listing_id" {
+		t.Errorf("unexpected error message: %q", resp["error"])
+	}
+}
+
+func TestHandleListPublicReviews_InvalidListerIDRejected(t *testing.T) {
+	s := &server{}
+	req := httptest.NewRequest(http.MethodGet, "/reviews?lister_id=not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	s.handleListPublicReviews(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "invalid lister_id" {
+		t.Errorf("unexpected error message: %q", resp["error"])
+	}
+}
+
+// TestHandleListPublicReviews_SQLInjectionAttemptsRejectedAsInvalidUUID
+// exercises a handful of classic SQL-injection-shaped strings against both
+// the listing_id and lister_id params. Because every query path uses
+// parameterized placeholders ($1/$2) rather than string concatenation, this
+// is mostly a defense-in-depth/observability check (do we leak a 500 or
+// behave oddly?) rather than a true injection vector — but it should still
+// always resolve to a clean 400 via uuidRe, never reach the database, and
+// never 500.
+func TestHandleListPublicReviews_SQLInjectionAttemptsRejectedAsInvalidUUID(t *testing.T) {
+	payloads := []string{
+		"'; DROP TABLE reviews; --",
+		"' OR '1'='1",
+		"00000000-0000-0000-0000-000000000001' OR '1'='1",
+		"1; SELECT * FROM users",
+		"%27%20OR%201=1",
+		"\" OR \"\"=\"",
+	}
+	s := &server{}
+	for _, payload := range payloads {
+		t.Run(payload, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/reviews?listing_id="+url.QueryEscape(payload), nil)
+			w := httptest.NewRecorder()
+			s.handleListPublicReviews(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for payload %q, got %d: %s", payload, w.Code, w.Body.String())
+			}
+
+			req2 := httptest.NewRequest(http.MethodGet, "/reviews?lister_id="+url.QueryEscape(payload), nil)
+			w2 := httptest.NewRecorder()
+			s.handleListPublicReviews(w2, req2)
+			if w2.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for lister_id payload %q, got %d: %s", payload, w2.Code, w2.Body.String())
+			}
+		})
+	}
+}
+
+// TestUUIDRegex_FormatValidation exercises the uuidRe pattern directly
+// against valid/invalid UUID shapes to confirm the 8-4-4-4-12 hex-digit
+// structure (case-insensitive) is enforced precisely, with no loose
+// trailing/leading garbage permitted.
+func TestUUIDRegex_FormatValidation(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"valid lowercase", "550e8400-e29b-41d4-a716-446655440000", true},
+		{"valid uppercase", "550E8400-E29B-41D4-A716-446655440000", true},
+		{"valid mixed case", "550e8400-E29B-41d4-A716-446655440000", true},
+		{"all zeros", "00000000-0000-0000-0000-000000000000", true},
+		{"wrong segment length (short last group)", "550e8400-e29b-41d4-a716-44665544000", false},
+		{"wrong segment length (long first group)", "550e8400a-e29b-41d4-a716-446655440000", false},
+		{"missing dashes", "550e8400e29b41d4a716446655440000", false},
+		{"extra trailing chars", "550e8400-e29b-41d4-a716-446655440000-extra", false},
+		{"leading garbage", "x550e8400-e29b-41d4-a716-446655440000", false},
+		{"empty string", "", false},
+		{"non-hex characters", "550e8400-e29b-41d4-a716-44665544000g", false},
+		{"sql injection attempt", "'; DROP TABLE reviews; --", false},
+		{"whitespace only", "   ", false},
+		{"uuid with surrounding whitespace", " 550e8400-e29b-41d4-a716-446655440000 ", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := uuidRe.MatchString(c.input)
+			if got != c.want {
+				t.Errorf("uuidRe.MatchString(%q) = %v, want %v", c.input, got, c.want)
+			}
+		})
+	}
+}
+
+// TestIntegration_ListPublicReviews_OrphanedReviewExcludedFromListerFilterButVisibleUnfiltered
+// covers a review row whose listing_id is NULL — the same scenario as
+// TestIntegration_ListPublicReviews_NullListingFallsBackToEmptyTitle, but
+// asserting the filter-exclusion behavior rather than the title fallback.
+//
+// IMPORTANT SCHEMA FINDING (see infra/postgres/migrate_reviews.sql):
+// reviews.listing_id does carry its own `ON DELETE SET NULL` FK to
+// listings(id), but reviews.conversation_id carries `ON DELETE CASCADE` to
+// conversations(id), and conversations.listing_id *also* carries
+// `ON DELETE CASCADE` to listings(id). Because Postgres cascades through
+// conversations first, actually deleting a listing deletes the conversation
+// (CASCADE) which deletes the review (CASCADE) — the review row is gone
+// before its own listing_id FK's SET NULL action would ever have a chance
+// to apply to a surviving row. In this schema, reviews.listing_id can only
+// become NULL by deleting a *listing whose conversation/review somehow
+// still exists independently* — a state that cannot arise via normal FK
+// cascade from a listing deletion, only via an UPDATE/INSERT done directly
+// against the reviews table. We exercise that directly instead, matching
+// the precedent set by NullListingFallsBackToEmptyTitle, and document this
+// finding for the Reviewer.
+//
+// This test confirms:
+//  1. a review with NULL listing_id still appears in the unfiltered global
+//     feed (LEFT JOIN listings — null listing_id tolerated, matches
+//     NullListingFallsBackToEmptyTitle);
+//  2. the same review is excluded when filtering by lister_id, because the
+//     lister_id path uses an INNER JOIN to listings and a null listing_id
+//     can no longer be attributed to any lister.
+func TestIntegration_ListPublicReviews_OrphanedReviewExcludedFromListerFilterButVisibleUnfiltered(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	convID := seedConfirmedConversation(t, db, listingID, testUserID, testListerID, 120000)
+
+	var reviewID string
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, NULL, 5, 'Orphaned review (NULL listing_id)', true) RETURNING id`,
+		testUserID, convID,
+	).Scan(&reviewID)
+	cleanupReview(t, db, reviewID)
+
+	s := &server{db: db}
+
+	// Unfiltered: the orphaned review must still appear.
+	reqUnfiltered := httptest.NewRequest(http.MethodGet, "/reviews", nil)
+	wUnfiltered := httptest.NewRecorder()
+	s.handleListPublicReviews(wUnfiltered, reqUnfiltered)
+	var unfiltered []PublicReview
+	json.NewDecoder(wUnfiltered.Body).Decode(&unfiltered)
+	foundUnfiltered := false
+	for _, rv := range unfiltered {
+		if rv.ID == reviewID {
+			foundUnfiltered = true
+		}
+	}
+	if !foundUnfiltered {
+		t.Error("expected orphaned review (NULL listing_id) to still appear in the unfiltered feed")
+	}
+
+	// Filtered by lister_id: the orphaned review must NOT appear, since it
+	// can no longer be attributed to any lister via INNER JOIN.
+	reqFiltered := httptest.NewRequest(http.MethodGet, "/reviews?lister_id="+testListerID, nil)
+	wFiltered := httptest.NewRecorder()
+	s.handleListPublicReviews(wFiltered, reqFiltered)
+	if wFiltered.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", wFiltered.Code, wFiltered.Body.String())
+	}
+	var filtered []PublicReview
+	json.NewDecoder(wFiltered.Body).Decode(&filtered)
+	for _, rv := range filtered {
+		if rv.ID == reviewID {
+			t.Error("expected orphaned review (NULL listing_id) to be excluded from lister_id filter via INNER JOIN")
+		}
+	}
+
+	// Also confirm handleReviewSummary excludes the orphaned review from the
+	// lister's average/count.
+	reqSummary := httptest.NewRequest(http.MethodGet, "/reviews/summary?lister_id="+testListerID, nil)
+	wSummary := httptest.NewRecorder()
+	s.handleReviewSummary(wSummary, reqSummary)
+	var summary ReviewSummary
+	json.NewDecoder(wSummary.Body).Decode(&summary)
+	if summary.Count != 0 {
+		t.Errorf("expected lister summary count=0 after the only review's listing was deleted, got %d", summary.Count)
+	}
+	if summary.Average != nil {
+		t.Errorf("expected lister summary average=nil after the only review's listing was deleted, got %v", *summary.Average)
+	}
+}
+
+// ── ReviewSummary ─────────────────────────────────────────────────────────────
+
+func TestIntegration_ReviewSummary_ByListingID(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	convID := seedConfirmedConversation(t, db, listingID, testUserID, testListerID, 120000)
+
+	seedSecondUser(t, db, testRenterID, "renter2@university.edu")
+	convID2 := seedConfirmedConversation(t, db, listingID, testRenterID, testListerID, 120000)
+
+	listingID2 := seedTestListing(t, db, testListerID, 130000)
+	thirdRenterID := "00000000-0000-0000-0000-000000000006"
+	seedSecondUser(t, db, thirdRenterID, "renter3@university.edu")
+	convID3 := seedConfirmedConversation(t, db, listingID2, thirdRenterID, testListerID, 130000)
+
+	var id1, id2, id3 string
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 5, 'a', true) RETURNING id`,
+		testUserID, convID, listingID,
+	).Scan(&id1)
+	cleanupReview(t, db, id1)
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 3, 'b', true) RETURNING id`,
+		testRenterID, convID2, listingID,
+	).Scan(&id2)
+	cleanupReview(t, db, id2)
+	// Review on a different listing must not be counted.
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 1, 'c', true) RETURNING id`,
+		thirdRenterID, convID3, listingID2,
+	).Scan(&id3)
+	cleanupReview(t, db, id3)
+
+	s := &server{db: db}
+	req := httptest.NewRequest(http.MethodGet, "/reviews/summary?listing_id="+listingID, nil)
+	w := httptest.NewRecorder()
+	s.handleReviewSummary(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var summary ReviewSummary
+	json.NewDecoder(w.Body).Decode(&summary)
+	if summary.Count != 2 {
+		t.Errorf("expected count=2, got %d", summary.Count)
+	}
+	if summary.Average == nil || *summary.Average != 4.0 {
+		t.Errorf("expected average=4.0, got %v", summary.Average)
+	}
+}
+
+func TestIntegration_ReviewSummary_ByListerIDAcrossListings(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	listingID2 := seedTestListing(t, db, testListerID, 130000)
+	convID := seedConfirmedConversation(t, db, listingID, testUserID, testListerID, 120000)
+
+	seedSecondUser(t, db, testRenterID, "renter2@university.edu")
+	convID2 := seedConfirmedConversation(t, db, listingID2, testRenterID, testListerID, 130000)
+
+	var id1, id2 string
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 5, 'a', true) RETURNING id`,
+		testUserID, convID, listingID,
+	).Scan(&id1)
+	cleanupReview(t, db, id1)
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 2, 'b', true) RETURNING id`,
+		testRenterID, convID2, listingID2,
+	).Scan(&id2)
+	cleanupReview(t, db, id2)
+
+	s := &server{db: db}
+	req := httptest.NewRequest(http.MethodGet, "/reviews/summary?lister_id="+testListerID, nil)
+	w := httptest.NewRecorder()
+	s.handleReviewSummary(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var summary ReviewSummary
+	json.NewDecoder(w.Body).Decode(&summary)
+	if summary.Count != 2 {
+		t.Errorf("expected count=2, got %d", summary.Count)
+	}
+	if summary.Average == nil || *summary.Average != 3.5 {
+		t.Errorf("expected average=3.5, got %v", summary.Average)
+	}
+}
+
+func TestIntegration_ReviewSummary_NoMatches_AverageIsLiteralNull(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+
+	s := &server{db: db}
+	req := httptest.NewRequest(http.MethodGet, "/reviews/summary?listing_id="+listingID, nil)
+	w := httptest.NewRecorder()
+	s.handleReviewSummary(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"average":null`) {
+		t.Errorf("expected literal JSON null for average, got body: %s", w.Body.String())
+	}
+	var summary ReviewSummary
+	json.NewDecoder(strings.NewReader(w.Body.String())).Decode(&summary)
+	if summary.Count != 0 {
+		t.Errorf("expected count=0, got %d", summary.Count)
+	}
+	if summary.Average != nil {
+		t.Errorf("expected average=nil, got %v", *summary.Average)
+	}
+}
+
+func TestIntegration_ReviewSummary_ExcludesUnpublished(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	convID := seedConfirmedConversation(t, db, listingID, testUserID, testListerID, 120000)
+
+	var publishedID, unpublishedID string
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 5, 'a', true) RETURNING id`,
+		testUserID, convID, listingID,
+	).Scan(&publishedID)
+	cleanupReview(t, db, publishedID)
+
+	seedSecondUser(t, db, testRenterID, "renter2@university.edu")
+	listingID2 := seedTestListing(t, db, testListerID, 130000)
+	convID2 := seedConfirmedConversation(t, db, listingID2, testRenterID, testListerID, 130000)
+	db.QueryRow(context.Background(),
+		`INSERT INTO reviews (reviewer_id, conversation_id, listing_id, rating, body, published)
+		 VALUES ($1, $2, $3, 1, 'b', false) RETURNING id`,
+		testRenterID, convID2, listingID2,
+	).Scan(&unpublishedID)
+	cleanupReview(t, db, unpublishedID)
+
+	s := &server{db: db}
+	req := httptest.NewRequest(http.MethodGet, "/reviews/summary?lister_id="+testListerID, nil)
+	w := httptest.NewRecorder()
+	s.handleReviewSummary(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var summary ReviewSummary
+	json.NewDecoder(w.Body).Decode(&summary)
+	if summary.Count != 1 {
+		t.Errorf("expected count=1 (unpublished excluded), got %d", summary.Count)
+	}
+	if summary.Average == nil || *summary.Average != 5.0 {
+		t.Errorf("expected average=5.0 (unpublished excluded), got %v", summary.Average)
+	}
+}
+
+func TestHandleReviewSummary_NoParamsRejected(t *testing.T) {
+	s := &server{}
+	req := httptest.NewRequest(http.MethodGet, "/reviews/summary", nil)
+	w := httptest.NewRecorder()
+	s.handleReviewSummary(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "listing_id or lister_id required" {
+		t.Errorf("unexpected error message: %q", resp["error"])
+	}
+}
+
+func TestHandleReviewSummary_BothParamsRejected(t *testing.T) {
+	s := &server{}
+	req := httptest.NewRequest(http.MethodGet,
+		"/reviews/summary?listing_id=00000000-0000-0000-0000-000000000001&lister_id=00000000-0000-0000-0000-000000000002", nil)
+	w := httptest.NewRecorder()
+	s.handleReviewSummary(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "specify listing_id or lister_id, not both" {
+		t.Errorf("unexpected error message: %q", resp["error"])
+	}
+}
+
+func TestHandleReviewSummary_InvalidListingIDRejected(t *testing.T) {
+	s := &server{}
+	req := httptest.NewRequest(http.MethodGet, "/reviews/summary?listing_id=not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	s.handleReviewSummary(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "invalid listing_id" {
+		t.Errorf("unexpected error message: %q", resp["error"])
+	}
+}
+
+func TestHandleReviewSummary_InvalidListerIDRejected(t *testing.T) {
+	s := &server{}
+	req := httptest.NewRequest(http.MethodGet, "/reviews/summary?lister_id=not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	s.handleReviewSummary(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "invalid lister_id" {
+		t.Errorf("unexpected error message: %q", resp["error"])
 	}
 }
 

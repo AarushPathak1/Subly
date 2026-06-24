@@ -602,6 +602,54 @@ export async function fetchPublicReviews(): Promise<PublicReview[]> {
   }
 }
 
+export interface ReviewSummary {
+  average: number | null;
+  count: number;
+}
+
+export async function fetchReviewsForListing(listingId: string, limit?: number): Promise<PublicReview[]> {
+  try {
+    const params = new URLSearchParams({ listing_id: listingId });
+    if (limit) params.set("limit", String(limit));
+    const res = await fetch(`${GATEWAY}/api/public/reviews?${params.toString()}`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchReviewsForLister(listerId: string, limit?: number): Promise<PublicReview[]> {
+  try {
+    const params = new URLSearchParams({ lister_id: listerId });
+    if (limit) params.set("limit", String(limit));
+    const res = await fetch(`${GATEWAY}/api/public/reviews?${params.toString()}`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchReviewSummary(
+  params: { listing_id: string } | { lister_id: string }
+): Promise<ReviewSummary | null> {
+  try {
+    const query = new URLSearchParams(params as Record<string, string>);
+    const res = await fetch(`${GATEWAY}/api/public/reviews/summary?${query.toString()}`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchPublicStats(): Promise<PublicStats | null> {
   try {
     const res = await fetch(`${GATEWAY}/api/public/stats`, {

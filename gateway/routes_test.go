@@ -117,6 +117,31 @@ func TestRouteTable_PublicPrefixBypassesAuth(t *testing.T) {
 	}
 }
 
+// TestRouteTable_PublicReviewSummaryBypassesAuth confirms the new
+// /api/public/reviews/summary endpoint (added for review-display filtering)
+// is reachable via the generic /api/public prefix match without a bearer
+// token, exactly like the pre-existing /api/public/reviews and
+// /api/public/stats endpoints. No gateway route-table change was required
+// for this endpoint, but this test pins down that the prefix match still
+// covers it.
+func TestRouteTable_PublicReviewSummaryBypassesAuth(t *testing.T) {
+	auth := newErrorAuthServer()
+	defer auth.Close()
+
+	mux, called := buildTestMux(t, auth.URL, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/public/reviews/summary?listing_id=00000000-0000-0000-0000-000000000001", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected /api/public/reviews/summary to reach upstream without auth, got %d", w.Code)
+	}
+	if !*called["/api/public"] {
+		t.Error("expected /api/public upstream to have been called")
+	}
+}
+
 // TestRouteTable_PublicStatsBypassesAuth is a second concrete public
 // endpoint (distinct path) to guard against a prefix-matching mistake that
 // only happens to work for /api/public/reviews specifically.

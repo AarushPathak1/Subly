@@ -1,7 +1,8 @@
 import { requireEduVerified } from "@/lib/auth";
 import { auth } from "@clerk/nextjs/server";
 import { AppNav } from "@/components/AppNav";
-import { fetchUserProfile } from "@/lib/actions";
+import { fetchUserProfile, fetchReviewsForLister, fetchReviewSummary } from "@/lib/actions";
+import { ReviewsSection } from "@/components/ReviewsSection";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -71,18 +72,22 @@ export default async function UserProfilePage({ params }: { params: { id: string
   const { getToken } = auth();
   const token = await getToken();
 
-  const [profile, listingsRes] = await Promise.all([
+  const [profile, listingsRes, reviews, reviewSummary] = await Promise.all([
     fetchUserProfile(params.id),
     fetch(`${GATEWAY}/api/listings/listings?user_id=${params.id}`, {
       headers: { Authorization: `Bearer ${token ?? ""}` },
       cache: "no-store",
     }),
+    fetchReviewsForLister(params.id),
+    fetchReviewSummary({ lister_id: params.id }),
   ]);
 
   if (!profile) notFound();
 
   const listings: Listing[] = listingsRes.ok ? await listingsRes.json() : [];
   const initial = profile.university ? profile.university[0].toUpperCase() : "S";
+  const summary = reviewSummary ?? { average: null, count: 0 };
+  const listerReviews = reviewSummary ? reviews : [];
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -115,6 +120,11 @@ export default async function UserProfilePage({ params }: { params: { id: string
               )}
             </div>
           </div>
+        </div>
+
+        {/* Reviews */}
+        <div className="mb-8">
+          <ReviewsSection title="Reviews" reviews={listerReviews} summary={summary} />
         </div>
 
         {/* Active listings */}

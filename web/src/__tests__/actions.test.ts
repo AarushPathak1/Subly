@@ -39,6 +39,9 @@ import {
   submitReview,
   fetchReviewEligibility,
   fetchPublicReviews,
+  fetchReviewsForListing,
+  fetchReviewsForLister,
+  fetchReviewSummary,
   fetchPublicStats,
   saveListing,
   unsaveListing,
@@ -414,6 +417,132 @@ describe("fetchPublicReviews", () => {
   it("returns empty array when fetch rejects", async () => {
     mockFetch.mockRejectedValueOnce(new Error("network error"));
     expect(await fetchPublicReviews()).toEqual([]);
+  });
+});
+
+// ── fetchReviewsForListing ─────────────────────────────────────────────────────
+
+describe("fetchReviewsForListing", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("calls the public reviews endpoint with listing_id query param", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
+    await fetchReviewsForListing("listing-1");
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("/api/public/reviews?");
+    expect(url).toContain("listing_id=listing-1");
+    expect(url).not.toContain("lister_id");
+  });
+
+  it("includes an explicit limit when provided", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
+    await fetchReviewsForListing("listing-1", 3);
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("limit=3");
+  });
+
+  it("omits limit param when not provided", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
+    await fetchReviewsForListing("listing-1");
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).not.toContain("limit=");
+  });
+
+  it("does not send an Authorization header (public endpoint)", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
+    await fetchReviewsForListing("listing-1");
+    const opts = mockFetch.mock.calls[0][1] ?? {};
+    expect(opts.headers).toBeUndefined();
+  });
+
+  it("returns reviews array on 200", async () => {
+    const reviews = [{ id: "r1", rating: 5, body: "Great!", created_at: "2026-01-01", reviewer_display_name: "A.", reviewer_university: "UCLA", listing_title: "Loft" }];
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => reviews });
+    expect(await fetchReviewsForListing("listing-1")).toEqual(reviews);
+  });
+
+  it("returns empty array when the API responds with an error", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false });
+    expect(await fetchReviewsForListing("listing-1")).toEqual([]);
+  });
+
+  it("returns empty array when fetch rejects", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await fetchReviewsForListing("listing-1")).toEqual([]);
+  });
+});
+
+// ── fetchReviewsForLister ──────────────────────────────────────────────────────
+
+describe("fetchReviewsForLister", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("calls the public reviews endpoint with lister_id query param", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
+    await fetchReviewsForLister("lister-1");
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("/api/public/reviews?");
+    expect(url).toContain("lister_id=lister-1");
+    expect(url).not.toContain("listing_id");
+  });
+
+  it("returns reviews array on 200", async () => {
+    const reviews = [{ id: "r2", rating: 4, body: "Solid", created_at: "2026-01-02", reviewer_display_name: "B.", reviewer_university: "USC", listing_title: "Studio" }];
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => reviews });
+    expect(await fetchReviewsForLister("lister-1")).toEqual(reviews);
+  });
+
+  it("returns empty array when the API responds with an error", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false });
+    expect(await fetchReviewsForLister("lister-1")).toEqual([]);
+  });
+
+  it("returns empty array when fetch rejects", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await fetchReviewsForLister("lister-1")).toEqual([]);
+  });
+});
+
+// ── fetchReviewSummary ─────────────────────────────────────────────────────────
+
+describe("fetchReviewSummary", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("calls the summary endpoint with listing_id when given listing_id", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ average: 4.5, count: 2 }) });
+    await fetchReviewSummary({ listing_id: "listing-1" });
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("/api/public/reviews/summary?");
+    expect(url).toContain("listing_id=listing-1");
+  });
+
+  it("calls the summary endpoint with lister_id when given lister_id", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ average: 4.5, count: 2 }) });
+    await fetchReviewSummary({ lister_id: "lister-1" });
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("lister_id=lister-1");
+  });
+
+  it("returns the summary payload (including literal null average) on 200", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ average: null, count: 0 }) });
+    expect(await fetchReviewSummary({ listing_id: "listing-1" })).toEqual({ average: null, count: 0 });
+  });
+
+  it("does not send an Authorization header (public endpoint)", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ average: null, count: 0 }) });
+    await fetchReviewSummary({ listing_id: "listing-1" });
+    const opts = mockFetch.mock.calls[0][1] ?? {};
+    expect(opts.headers).toBeUndefined();
+  });
+
+  it("returns null when the API responds with an error", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false });
+    expect(await fetchReviewSummary({ listing_id: "listing-1" })).toBeNull();
+  });
+
+  it("returns null when fetch rejects", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    expect(await fetchReviewSummary({ lister_id: "lister-1" })).toBeNull();
   });
 });
 

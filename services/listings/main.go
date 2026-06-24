@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,8 @@ import (
 )
 
 var log = logger.New(logger.ConfigFromEnv("listings"))
+
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +109,11 @@ type PublicReview struct {
 	ListingTitle        string    `json:"listing_title"`
 }
 
+type ReviewSummary struct {
+	Average *float64 `json:"average"`
+	Count   int      `json:"count"`
+}
+
 type PublicStats struct {
 	ListingsTotal        int       `json:"listings_total"`
 	UniversitiesTotal    int       `json:"universities_total"`
@@ -159,6 +167,7 @@ func (s *server) routes() http.Handler {
 	// gateway/main.go buildRoutes + http.StripPrefix), unlike /api/listings
 	// and /api/messages which forward their remainder verbatim.
 	mux.HandleFunc("GET /reviews", s.handleListPublicReviews)
+	mux.HandleFunc("GET /reviews/summary", s.handleReviewSummary)
 	mux.HandleFunc("GET /stats", s.handlePublicStats)
 	mux.HandleFunc("GET /saved", s.handleListSaved)
 	mux.HandleFunc("POST /saved", s.handleSaveListing)
@@ -1108,6 +1117,21 @@ func (s *server) handleReviewEligibility(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *server) handleListPublicReviews(w http.ResponseWriter, r *http.Request) {
+	listingID := r.URL.Query().Get("listing_id")
+	listerID := r.URL.Query().Get("lister_id")
+	if listingID != "" && listerID != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "specify listing_id or lister_id, not both"})
+		return
+	}
+	if listingID != "" && !uuidRe.MatchString(listingID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid listing_id"})
+		return
+	}
+	if listerID != "" && !uuidRe.MatchString(listerID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid lister_id"})
+		return
+	}
+
 	limit := 6
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 {
@@ -1118,17 +1142,51 @@ func (s *server) handleListPublicReviews(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	rows, err := s.db.Query(r.Context(), `
-		SELECT rv.id, rv.rating, rv.body, rv.created_at, u.email,
-		       COALESCE(up.university, u.university, ''),
-		       COALESCE(l.title, '')
-		FROM reviews rv
-		JOIN users u       ON u.id = rv.reviewer_id
-		LEFT JOIN user_profiles up ON up.user_id = u.id
-		LEFT JOIN listings l       ON l.id = rv.listing_id
-		WHERE rv.published = true AND rv.body != ''
-		ORDER BY rv.created_at DESC
-		LIMIT $1`, limit)
+	var query string
+	var args []any
+	switch {
+	case listingID != "":
+		query = `
+			SELECT rv.id, rv.rating, rv.body, rv.created_at, u.email,
+			       COALESCE(up.university, u.university, ''),
+			       COALESCE(l.title, '')
+			FROM reviews rv
+			JOIN users u       ON u.id = rv.reviewer_id
+			LEFT JOIN user_profiles up ON up.user_id = u.id
+			LEFT JOIN listings l       ON l.id = rv.listing_id
+			WHERE rv.published = true AND rv.listing_id = $1
+			ORDER BY rv.created_at DESC
+			LIMIT $2`
+		args = []any{listingID, limit}
+	case listerID != "":
+		query = `
+			SELECT rv.id, rv.rating, rv.body, rv.created_at, u.email,
+			       COALESCE(up.university, u.university, ''),
+			       COALESCE(l.title, '')
+			FROM reviews rv
+			JOIN users u       ON u.id = rv.reviewer_id
+			LEFT JOIN user_profiles up ON up.user_id = u.id
+			JOIN listings l            ON l.id = rv.listing_id
+			WHERE rv.published = true AND l.user_id = $1
+			ORDER BY rv.created_at DESC
+			LIMIT $2`
+		args = []any{listerID, limit}
+	default:
+		query = `
+			SELECT rv.id, rv.rating, rv.body, rv.created_at, u.email,
+			       COALESCE(up.university, u.university, ''),
+			       COALESCE(l.title, '')
+			FROM reviews rv
+			JOIN users u       ON u.id = rv.reviewer_id
+			LEFT JOIN user_profiles up ON up.user_id = u.id
+			LEFT JOIN listings l       ON l.id = rv.listing_id
+			WHERE rv.published = true AND rv.body != ''
+			ORDER BY rv.created_at DESC
+			LIMIT $1`
+		args = []any{limit}
+	}
+
+	rows, err := s.db.Query(r.Context(), query, args...)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, err)
 		return
@@ -1148,6 +1206,48 @@ func (s *server) handleListPublicReviews(w http.ResponseWriter, r *http.Request)
 		reviews = append(reviews, pr)
 	}
 	writeJSON(w, http.StatusOK, reviews)
+}
+
+func (s *server) handleReviewSummary(w http.ResponseWriter, r *http.Request) {
+	listingID := r.URL.Query().Get("listing_id")
+	listerID := r.URL.Query().Get("lister_id")
+	if listingID == "" && listerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "listing_id or lister_id required"})
+		return
+	}
+	if listingID != "" && listerID != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "specify listing_id or lister_id, not both"})
+		return
+	}
+	if listingID != "" && !uuidRe.MatchString(listingID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid listing_id"})
+		return
+	}
+	if listerID != "" && !uuidRe.MatchString(listerID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid lister_id"})
+		return
+	}
+
+	var query string
+	var arg string
+	if listingID != "" {
+		query = `SELECT ROUND(AVG(rating)::numeric, 1), COUNT(*) FROM reviews WHERE published = true AND listing_id = $1`
+		arg = listingID
+	} else {
+		query = `
+			SELECT ROUND(AVG(rv.rating)::numeric, 1), COUNT(*)
+			FROM reviews rv
+			JOIN listings l ON l.id = rv.listing_id
+			WHERE rv.published = true AND l.user_id = $1`
+		arg = listerID
+	}
+
+	var summary ReviewSummary
+	if err := s.db.QueryRow(r.Context(), query, arg).Scan(&summary.Average, &summary.Count); err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, summary)
 }
 
 // statQuery runs a single stats query and scans it into dest. Failures are

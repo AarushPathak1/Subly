@@ -1,8 +1,9 @@
 import { requireEduVerified } from "@/lib/auth";
 import { auth } from "@clerk/nextjs/server";
 import { AppNav } from "@/components/AppNav";
-import { startConversation, fetchSavedListingIds } from "@/lib/actions";
+import { startConversation, fetchSavedListingIds, fetchReviewsForLister, fetchReviewSummary } from "@/lib/actions";
 import { SaveButton } from "@/components/SaveButton";
+import { ReviewsSection } from "@/components/ReviewsSection";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -70,7 +71,13 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
   const listing: Listing = await res.json();
   const rent = `$${(listing.rent_cents / 100).toLocaleString()}/mo`;
   const isOwner = user.id === listing.user_id;
-  const savedIds = isOwner ? new Set<string>() : await fetchSavedListingIds();
+  const [savedIds, reviews, reviewSummary] = await Promise.all([
+    isOwner ? Promise.resolve(new Set<string>()) : fetchSavedListingIds(),
+    fetchReviewsForLister(listing.user_id),
+    fetchReviewSummary({ lister_id: listing.user_id }),
+  ]);
+  const summary = reviewSummary ?? { average: null, count: 0 };
+  const listerReviews = reviewSummary ? reviews : [];
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -242,6 +249,11 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
               >
                 Browse all listings
               </Link>
+            </div>
+
+            {/* Reviews of this lister */}
+            <div className="border-t border-slate-100 pt-6 mt-6">
+              <ReviewsSection title="Reviews of this lister" reviews={listerReviews} summary={summary} />
             </div>
           </div>
         </div>
