@@ -12,6 +12,7 @@ let initialized = false;
 export function initPostHogClient(): void {
   if (typeof window === "undefined") return;
   if (initialized) return;
+  if (window.localStorage.getItem("subly_cookie_consent") === "declined") return;
 
   const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
   if (!key) return;

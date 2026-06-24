@@ -64,6 +64,24 @@ describe("posthog client smoke tests", () => {
     expect(opts.capture_pageview).toBe(false);
   });
 
+  it("does NOT call posthog.init when subly_cookie_consent is 'declined', even with a key set", async () => {
+    process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test123";
+    window.localStorage.setItem("subly_cookie_consent", "declined");
+    const { initPostHogClient } = await import("../lib/posthog/client");
+    initPostHogClient();
+    expect(initMock).not.toHaveBeenCalled();
+    window.localStorage.removeItem("subly_cookie_consent");
+  });
+
+  it("calls posthog.init when subly_cookie_consent is 'accepted' and a key is set", async () => {
+    process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test123";
+    window.localStorage.setItem("subly_cookie_consent", "accepted");
+    const { initPostHogClient } = await import("../lib/posthog/client");
+    initPostHogClient();
+    expect(initMock).toHaveBeenCalledTimes(1);
+    window.localStorage.removeItem("subly_cookie_consent");
+  });
+
   it("capture() no-ops when not initialized", async () => {
     delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
     const { capture } = await import("../lib/posthog/client");

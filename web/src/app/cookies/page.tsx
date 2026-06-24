@@ -6,6 +6,7 @@ export const metadata = { title: "Cookie Policy — Subly" };
 const sections = [
   { id: "what-are-cookies", label: "What are cookies?" },
   { id: "cookies-we-use", label: "Cookies we use" },
+  { id: "analytics-events", label: "Analytics events" },
   { id: "your-choices", label: "Your choices" },
   { id: "changes", label: "Changes" },
   { id: "contact", label: "Contact" },
@@ -36,16 +37,16 @@ export default function CookiesPage() {
                   <SublyLogo size={32} />
                 </div>
                 <p className="text-sm font-medium leading-snug">
-                  We use cookies only for authentication. No trackers, no ad networks.
+                  We use cookies for authentication, plus one optional analytics cookie. No ad networks.
                 </p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Cookie count</p>
                 <div className="text-center py-2">
-                  <span className="text-4xl font-bold text-emerald-600">2</span>
+                  <span className="text-4xl font-bold text-emerald-600">3</span>
                   <p className="text-sm text-slate-500 mt-1">cookies total</p>
                 </div>
-                <p className="text-xs text-slate-400 text-center">Both are essential. Neither tracks you.</p>
+                <p className="text-xs text-slate-400 text-center">Two are essential. One is optional analytics you can decline.</p>
               </div>
             </div>
           </aside>
@@ -53,7 +54,7 @@ export default function CookiesPage() {
           {/* Main content */}
           <main>
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Cookie Policy</h1>
-            <p className="text-sm text-slate-500 mb-10">Last updated: May 2025</p>
+            <p className="text-sm text-slate-500 mb-10">Last updated: June 2026</p>
 
             <div className="space-y-10 text-slate-700 leading-relaxed">
               <section id="what-are-cookies">
@@ -80,18 +81,29 @@ export default function CookiesPage() {
                     </thead>
                     <tbody>
                       <tr>
-                        <td className="p-3 border border-slate-200 font-mono text-xs">__clerk_*</td>
+                        <td className="p-3 border border-slate-200 font-mono text-xs">__clerk_*, __session, __client_uat</td>
                         <td className="p-3 border border-slate-200">Essential</td>
                         <td className="p-3 border border-slate-200">
                           Keeps you logged in between page loads. Set by Clerk, our authentication provider.
                         </td>
-                        <td className="p-3 border border-slate-200">Session / 30 days</td>
+                        <td className="p-3 border border-slate-200">Session / up to 30 days</td>
                       </tr>
                       <tr className="bg-slate-50">
-                        <td className="p-3 border border-slate-200 font-mono text-xs">subly_cookie_consent</td>
+                        <td className="p-3 border border-slate-200 font-mono text-xs">
+                          subly_cookie_consent <span className="text-slate-400">(browser localStorage, not a cookie)</span>
+                        </td>
                         <td className="p-3 border border-slate-200">Essential</td>
                         <td className="p-3 border border-slate-200">
-                          Remembers whether you accepted or declined optional cookies so we don&apos;t ask again.
+                          Remembers your analytics preference so the cookie banner doesn&apos;t reappear.
+                        </td>
+                        <td className="p-3 border border-slate-200">Until cleared by you</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 border border-slate-200 font-mono text-xs">ph_*_posthog</td>
+                        <td className="p-3 border border-slate-200">Optional / Analytics</td>
+                        <td className="p-3 border border-slate-200">
+                          Pseudonymous distinct ID used to group product analytics events. Only set if you
+                          haven&apos;t declined analytics in the cookie banner.
                         </td>
                         <td className="p-3 border border-slate-200">1 year</td>
                       </tr>
@@ -100,8 +112,36 @@ export default function CookiesPage() {
                 </div>
 
                 <p className="mt-4 text-sm text-slate-500">
-                  Subly currently uses only essential cookies required for authentication. We do not
-                  use advertising or third-party tracking cookies.
+                  We do not use advertising cookies or third-party ad-tracking cookies. We do use
+                  PostHog, a product analytics provider, which sets one optional cookie described
+                  above when analytics is enabled.
+                </p>
+              </section>
+
+              <section id="analytics-events">
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">Analytics events</h2>
+                <p className="mb-3">
+                  When analytics is enabled, we use PostHog to record a small set of named product
+                  events. We do not use PostHog&apos;s autocapture, so no events fire beyond the ones
+                  listed here:
+                </p>
+                <ul className="list-disc pl-5 space-y-2">
+                  <li><code>$pageview</code> — fired on every route change, with the current URL.</li>
+                  <li><code>$pageleave</code> — fired automatically when you navigate away from a page.</li>
+                  <li><code>listing_created</code> — rent, bedrooms, bathrooms, university, image count, and whether an end date was set.</li>
+                  <li><code>message_sent</code> — conversation ID, whether you&apos;re the lister, and message length (not the message body).</li>
+                  <li><code>match_confirmed</code> — conversation ID and whether the listing title was known at confirmation time.</li>
+                  <li><code>review_submitted</code> — conversation ID and rating (not the review body).</li>
+                  <li><code>payment_completed</code> — conversation ID, amount, currency, and Stripe session ID (recorded server-side).</li>
+                </ul>
+                <p className="mt-3">
+                  When you sign in, we also call PostHog&apos;s <code>identify()</code> with your Clerk
+                  user ID and university so events can be grouped to your account.
+                </p>
+                <p className="mt-3">
+                  We also use Sentry for error monitoring. Sentry is triggered only when an error
+                  occurs, and the data it may capture can include the page URL, your Clerk user ID,
+                  your browser and operating system, and a stack trace.
                 </p>
               </section>
 
@@ -111,6 +151,14 @@ export default function CookiesPage() {
                   Essential cookies (authentication) cannot be disabled without breaking core
                   functionality. You can control all cookies through your browser settings. Note
                   that disabling cookies will log you out and prevent you from signing back in.
+                </p>
+                <p className="mt-3">
+                  Clicking <strong>Decline</strong> in the cookie banner stops product analytics
+                  from initializing on that browser — PostHog will not load and no events will be
+                  sent. Clicking <strong>Accept</strong> (or never declining) allows analytics to
+                  run. You can reset this choice and make the banner reappear at any time by
+                  clearing the <code>subly_cookie_consent</code> entry from your browser&apos;s
+                  local storage.
                 </p>
                 <p className="mt-3">Most browsers let you view, block, or delete cookies via their settings menu:</p>
                 <ul className="list-disc pl-5 mt-2 space-y-1">

@@ -62,7 +62,7 @@ export default function PrivacyPage() {
           {/* Main content */}
           <main>
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Privacy Policy</h1>
-            <p className="text-sm text-slate-500 mb-10">Last updated: June 2026</p>
+            <p className="text-sm text-slate-500 mb-10">Last updated: June 2026 (revision 2)</p>
 
             <div className="space-y-10 text-slate-700 leading-relaxed">
               <section id="who-we-are">
@@ -82,20 +82,47 @@ export default function PrivacyPage() {
                     (collected via Clerk authentication).
                   </li>
                   <li>
-                    <strong>Profile preferences:</strong> housing preferences, budget range, and vibe
-                    profile you enter during onboarding.
+                    <strong>Profile preferences:</strong> vibe text, target university, rent budget, and
+                    minimum bedrooms you enter during onboarding. These are editable at any time from
+                    the{" "}
+                    <Link href="/settings" className="text-indigo-600 hover:underline">
+                      Settings
+                    </Link>{" "}
+                    page.
                   </li>
                   <li>
-                    <strong>Listing content:</strong> photos, descriptions, addresses, and pricing you
-                    submit when posting a sublease.
+                    <strong>Listing content:</strong> photos, descriptions, addresses, pricing, dates,
+                    bedrooms/bathrooms, and amenities you submit when posting a sublease.
                   </li>
                   <li>
-                    <strong>Usage data:</strong> pages visited, features used, and general interaction
-                    patterns (no individual tracking pixels).
+                    <strong>Conversation content:</strong> message bodies, plus structured viewing
+                    proposals (proposed date/time, an optional note up to 280 characters, and status:
+                    pending, accepted, declined, or superseded), and read receipts.
                   </li>
                   <li>
-                    <strong>Cookies:</strong> session cookies for authentication and optional analytics
-                    cookies (see our{" "}
+                    <strong>Bookmarks:</strong> the listings you save and when you saved them.
+                  </li>
+                  <li>
+                    <strong>Activity counters:</strong> an aggregate view count per listing, shown only
+                    to the listing&apos;s owner — not tied to which specific user viewed it.
+                  </li>
+                  <li>
+                    <strong>Reviews:</strong> the rating and body text you submit.
+                  </li>
+                  <li>
+                    <strong>Payment metadata:</strong> Stripe session ID, amount, currency, and
+                    confirmation timestamp — never your full card number.
+                  </li>
+                  <li>
+                    <strong>Product analytics:</strong> see our{" "}
+                    <Link href="/cookies" className="text-indigo-600 hover:underline">
+                      Cookie Policy
+                    </Link>{" "}
+                    for the exact events we record.
+                  </li>
+                  <li>
+                    <strong>Cookies:</strong> session cookies for authentication and an optional
+                    analytics cookie (see our{" "}
                     <Link href="/cookies" className="text-indigo-600 hover:underline">
                       Cookie Policy
                     </Link>
@@ -116,6 +143,11 @@ export default function PrivacyPage() {
                   <li>To display your listings to other verified students.</li>
                   <li>To detect and prevent fraudulent listings using automated scoring.</li>
                   <li>To send transactional emails (match alerts, account notices) via your .edu address.</li>
+                  <li>To let listers see aggregate view-count engagement on their own listings.</li>
+                  <li>
+                    To power the in-thread viewing scheduler, which is visible only to the two
+                    participants in a conversation.
+                  </li>
                 </ul>
               </section>
 
@@ -148,6 +180,30 @@ export default function PrivacyPage() {
                     </a>
                     . We store only the Stripe session ID and payment status in our database.
                   </li>
+                  <li>
+                    <strong>PostHog</strong> — when PostHog is enabled, it receives the product
+                    analytics events described in our{" "}
+                    <Link href="/cookies" className="text-indigo-600 hover:underline">
+                      Cookie Policy
+                    </Link>{" "}
+                    (page views, listing creation metadata, message length, match confirmations,
+                    review ratings, and payment confirmation metadata), plus your Clerk user ID and
+                    university when you sign in. See PostHog&apos;s{" "}
+                    <a href="https://posthog.com/privacy" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
+                      Privacy Policy
+                    </a>
+                    .
+                  </li>
+                  <li>
+                    <strong>Sentry</strong> — when Sentry is enabled, it receives error monitoring
+                    data triggered only when an error occurs, which may include the page URL, your
+                    Clerk user ID, your browser and operating system, and a stack trace. See
+                    Sentry&apos;s{" "}
+                    <a href="https://sentry.io/privacy/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
+                      Privacy Policy
+                    </a>
+                    .
+                  </li>
                 </ul>
               </section>
 
@@ -157,6 +213,17 @@ export default function PrivacyPage() {
                   We retain your account and listing data for as long as your account is active. If you
                   delete your account, we remove your personal information within 30 days, except where
                   retention is required by law.
+                </p>
+                <p className="mt-3">
+                  Bookmarks, view counts, viewing proposals, and messages are retained as long as the
+                  related listing or conversation exists, and are removed automatically when the
+                  listing is deleted. If you delete your account, this data is removed within the same
+                  30-day window described above.
+                </p>
+                {/* TODO: legal review — confirm or specify analytics retention period */}
+                <p className="mt-3">
+                  Analytics events held by PostHog and Sentry are retained per their respective default
+                  retention policies; contact us to request deletion of your distinct ID.
                 </p>
               </section>
 

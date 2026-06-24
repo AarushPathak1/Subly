@@ -121,6 +121,7 @@ Visitor clicks magic link → /signup?token=X → verifies token
 | **Image Storage** | AWS S3 + Pre-signed URLs | Browser uploads directly to S3 — servers never handle image bytes. Eliminates a bottleneck and keeps all compute services stateless. |
 | **Transactional Email** | Resend | Invite emails after admin approval. Falls back to stdout when `RESEND_API_KEY` is unset for local development. |
 | **Validation** | Zod | Single schema shared between Server Actions (server-side parse) and form components (client-side parse). One source of truth, two enforcement points. |
+| **Analytics** | PostHog | Tracks pageviews, listing creation, message sends, match confirmations, reviews, and payment completion via named events. Autocapture is disabled — only the named events fire. No-ops client- and server-side when keys are unset. |
 
 ---
 
@@ -143,9 +144,13 @@ No payment is required from the renter. There are no subscription fees, listing 
 `infra/postgres/init.sql` is applied automatically on first boot via the Docker entrypoint. For existing databases, apply the numbered migrations in order:
 
 ```bash
-psql $DATABASE_URL -f infra/postgres/migrate_chat.sql       # 1 — chat columns
-psql $DATABASE_URL -f infra/postgres/migrate_payments.sql   # 2 — payment columns
-psql $DATABASE_URL -f infra/postgres/migrate_expiration.sql # 3 — expired status enum
+psql $DATABASE_URL -f infra/postgres/migrate_chat.sql           # 1 — chat columns
+psql $DATABASE_URL -f infra/postgres/migrate_payments.sql       # 2 — payment columns
+psql $DATABASE_URL -f infra/postgres/migrate_expiration.sql     # 3 — expired status enum
+psql $DATABASE_URL -f infra/postgres/migrate_reviews.sql        # 4 — reviews table
+psql $DATABASE_URL -f infra/postgres/migrate_saved_listings.sql # 5 — saved listings (bookmarks)
+psql $DATABASE_URL -f infra/postgres/migrate_viewings.sql       # 6 — viewing scheduler columns
+psql $DATABASE_URL -f infra/postgres/migrate_view_count.sql     # 7 — listing view_count column
 ```
 
 All statements are idempotent (`IF NOT EXISTS`) except the enum addition in migration 3, which uses `ADD VALUE IF NOT EXISTS` and must **not** be run inside a transaction block.
@@ -163,12 +168,16 @@ All statements are idempotent (`IF NOT EXISTS`) except the enum addition in migr
 | `/dashboard` | Clerk + edu | Personalized AI match feed ranked by semantic similarity |
 | `/listings` | Clerk + edu | Browse all active listings with filters |
 | `/listings/new` | Clerk + edu | Create a new sublease listing |
-| `/listings/my` | Clerk + edu | Manage your listings (pause / reactivate / mark leased) |
-| `/listings/[id]` | Clerk + edu | Listing detail — images, trust badge, "Message lister" CTA |
+| `/listings/my` | Clerk + edu | Manage your listings (pause / reactivate / mark leased), including per-listing view counts |
+| `/listings/saved` | Clerk + edu | Your bookmarked (saved) listings |
+| `/listings/[id]` | Clerk + edu | Listing detail — images, trust badge, "Message lister" CTA, Save/bookmark button, increments the view count for non-owners |
 | `/listings/[id]/edit` | Clerk + owner | Edit listing (ownership enforced server-side) |
 | `/messages` | Clerk + edu | Inbox — all conversations with unread indicators |
-| `/messages/[id]` | Clerk + edu | Thread — chat, confirm panel (lister), renter info banner |
+| `/messages/[id]` | Clerk + edu | Thread — chat, viewing-proposal scheduler, confirm panel (lister), renter info banner |
 | `/messages/[id]/confirmed` | Clerk + edu | Post-payment page — verifies Stripe session, marks match confirmed |
+| `/settings` | Clerk + edu | Edit profile preferences (university, budget, vibe text) post-onboarding |
+| `/profile` | Clerk + edu | Redirects to your own `/users/[id]` page |
+| `/users/[id]` | Clerk + edu | Public user profile — member since, their active listings, reviews |
 | `/admin/invites` | Admin only | Review and approve/reject invite requests |
 | `/privacy`, `/terms`, `/cookies` | Public | Legal pages (includes payment terms and Stripe disclosure) |
 
@@ -304,9 +313,13 @@ Fill in `.env`:
 
 ```bash
 docker compose up postgres -d
-psql $DATABASE_URL -f infra/postgres/migrate_chat.sql       # 1 — chat columns
-psql $DATABASE_URL -f infra/postgres/migrate_payments.sql   # 2 — payment columns
-psql $DATABASE_URL -f infra/postgres/migrate_expiration.sql # 3 — expired status enum (not transactional)
+psql $DATABASE_URL -f infra/postgres/migrate_chat.sql           # 1 — chat columns
+psql $DATABASE_URL -f infra/postgres/migrate_payments.sql       # 2 — payment columns
+psql $DATABASE_URL -f infra/postgres/migrate_expiration.sql     # 3 — expired status enum (not transactional)
+psql $DATABASE_URL -f infra/postgres/migrate_reviews.sql        # 4 — reviews table
+psql $DATABASE_URL -f infra/postgres/migrate_saved_listings.sql # 5 — saved listings (bookmarks)
+psql $DATABASE_URL -f infra/postgres/migrate_viewings.sql       # 6 — viewing scheduler columns
+psql $DATABASE_URL -f infra/postgres/migrate_view_count.sql     # 7 — listing view_count column
 ```
 
 `init.sql` is applied automatically on first boot. The numbered migrations are for existing databases only.
@@ -390,10 +403,14 @@ subly/
 │           └── auth.ts            # requireEduVerified, getSessionUser
 ├── infra/
 │   ├── postgres/
-│   │   ├── init.sql               # Full schema (users, listings, conversations, messages, ...)
-│   │   ├── migrate_chat.sql       # Migration 1: add messaging columns
-│   │   ├── migrate_payments.sql   # Migration 2: add payment confirmation columns
-│   │   └── migrate_expiration.sql # Migration 3: add expired status enum
+│   │   ├── init.sql                   # Full schema (users, listings, conversations, messages, ...)
+│   │   ├── migrate_chat.sql           # Migration 1: add messaging columns
+│   │   ├── migrate_payments.sql       # Migration 2: add payment confirmation columns
+│   │   ├── migrate_expiration.sql     # Migration 3: add expired status enum
+│   │   ├── migrate_reviews.sql        # Migration 4: add reviews table
+│   │   ├── migrate_saved_listings.sql # Migration 5: add saved listings (bookmarks)
+│   │   ├── migrate_viewings.sql       # Migration 6: add viewing scheduler columns
+│   │   └── migrate_view_count.sql     # Migration 7: add listing view_count column
 │   └── rabbitmq/
 ├── docker-compose.yml
 └── .env.example
@@ -449,6 +466,12 @@ S3_BUCKET_NAME=subly-listing-images
 # Resend — transactional email for magic links (optional; logs to stdout if unset)
 RESEND_API_KEY=re_...
 FROM_EMAIL=Subly <invites@subly.app>
+
+# PostHog — product analytics (optional; client and server no-op if keys unset)
+NEXT_PUBLIC_POSTHOG_KEY=
+NEXT_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
+POSTHOG_API_KEY=
+POSTHOG_HOST=https://us.i.posthog.com
 
 # Sentry — error tracking (optional; services no-op if DSN unset)
 SENTRY_DSN=

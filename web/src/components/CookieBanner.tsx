@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { initPostHogClient } from "@/lib/posthog/client";
 
 const CONSENT_KEY = "subly_cookie_consent";
 
@@ -15,6 +16,7 @@ export function CookieBanner() {
 
   function accept() {
     localStorage.setItem(CONSENT_KEY, "accepted");
+    initPostHogClient();
     setVisible(false);
   }
 

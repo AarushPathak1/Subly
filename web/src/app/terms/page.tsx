@@ -8,6 +8,7 @@ const sections = [
   { id: "eligibility", label: "Eligibility" },
   { id: "what-subly-is", label: "What Subly is" },
   { id: "listings", label: "Listings" },
+  { id: "viewings", label: "Viewings and in-person meetings" },
   { id: "payments", label: "Payments & fees" },
   { id: "prohibited", label: "Prohibited conduct" },
   { id: "ai-features", label: "AI-powered features" },
@@ -67,7 +68,7 @@ export default function TermsPage() {
           {/* Main content */}
           <main>
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Terms of Service</h1>
-            <p className="text-sm text-slate-500 mb-10">Last updated: June 2026</p>
+            <p className="text-sm text-slate-500 mb-10">Last updated: June 2026 (revision 2)</p>
 
             <div className="space-y-10 text-slate-700 leading-relaxed">
               <section id="acceptance">
@@ -111,11 +112,28 @@ export default function TermsPage() {
                     We reserve the right to remove any listing at our discretion, including but not
                     limited to policy violations, user reports, or fraud signals.
                   </li>
+                  <li>
+                    We track an aggregate view count for each listing, visible only to the lister on
+                    their My Listings page. This is a rough engagement signal, not a guarantee of
+                    reach or listing quality.
+                  </li>
                 </ul>
               </section>
 
+              <section id="viewings">
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">5. Viewings and in-person meetings</h2>
+                <p>
+                  Subly lets renters and listers propose specific viewing times inside the chat
+                  thread. A proposal is a record between the two of you; Subly does not enforce
+                  attendance, verify that a viewing took place, or insure either party against loss
+                  or injury. You are solely responsible for deciding whether, where, and how to meet.
+                  We recommend meeting in public, bringing a friend, and never paying any deposit
+                  before signing a written lease or sublease agreement.
+                </p>
+              </section>
+
               <section id="payments">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">5. Payments and fees</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">6. Payments and fees</h2>
                 <p className="mb-3">
                   Subly charges a one-time match confirmation fee when a lister chooses to confirm a sublease match. This fee is based on the listing&apos;s advertised monthly rent at the time the conversation was created:
                 </p>
@@ -137,7 +155,7 @@ export default function TermsPage() {
               </section>
 
               <section id="prohibited">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">6. Prohibited conduct</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">7. Prohibited conduct</h2>
                 <p className="mb-3">You agree not to:</p>
                 <ul className="list-disc pl-5 space-y-2">
                   <li>Post listings for properties you do not have the right to sublease.</li>
@@ -146,11 +164,20 @@ export default function TermsPage() {
                   <li>Attempt to scrape, reverse-engineer, or abuse the platform or its APIs.</li>
                   <li>Harass, threaten, or discriminate against other users.</li>
                   <li>Post false, misleading, or fraudulent listing information.</li>
+                  <li>
+                    Misuse the viewing scheduler to harass another user, repeatedly no-show on
+                    proposed viewings, or coordinate off-platform deals to bypass the match
+                    confirmation fee.
+                  </li>
+                  <li>
+                    Artificially inflate listing view counts, including through scripted or bot page
+                    loads.
+                  </li>
                 </ul>
               </section>
 
               <section id="ai-features">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">7. AI-powered features</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">8. AI-powered features</h2>
                 <p>
                   Subly uses AI to generate match scores between renters and listings. These scores
                   are suggestions only and should not be treated as guarantees of compatibility,
@@ -160,7 +187,7 @@ export default function TermsPage() {
               </section>
 
               <section id="ip">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">8. Intellectual property</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">9. Intellectual property</h2>
                 <p>
                   By posting content (photos, descriptions) on Subly, you grant us a non-exclusive,
                   royalty-free license to display that content on the platform. You retain ownership
@@ -170,7 +197,7 @@ export default function TermsPage() {
               </section>
 
               <section id="disclaimers">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">9. Disclaimers</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">10. Disclaimers</h2>
                 <p>
                   Subly is provided "as is" without warranties of any kind. We do not verify the
                   accuracy of listings beyond automated fraud detection. We are not responsible for
@@ -180,7 +207,7 @@ export default function TermsPage() {
               </section>
 
               <section id="liability">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">10. Limitation of liability</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">11. Limitation of liability</h2>
                 <p>
                   To the maximum extent permitted by law, Subly's total liability to you for any
                   claim arising from your use of the platform is limited to the amount you paid us
@@ -189,7 +216,7 @@ export default function TermsPage() {
               </section>
 
               <section id="termination">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">11. Termination</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">12. Termination</h2>
                 <p>
                   We may suspend or terminate your account at any time for violation of these Terms.
                   You may delete your account at any time from your account settings.
@@ -197,7 +224,7 @@ export default function TermsPage() {
               </section>
 
               <section id="changes">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">12. Changes to these Terms</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">13. Changes to these Terms</h2>
                 <p>
                   We may update these Terms as the product evolves. Continued use of Subly after
                   changes take effect constitutes acceptance of the updated Terms.
@@ -205,7 +232,7 @@ export default function TermsPage() {
               </section>
 
               <section id="contact">
-                <h2 className="text-xl font-semibold text-slate-900 mb-3">13. Contact</h2>
+                <h2 className="text-xl font-semibold text-slate-900 mb-3">14. Contact</h2>
                 <p>
                   Questions? Email us at{" "}
                   <a href="mailto:legal@subly.app" className="text-indigo-600 hover:underline">
