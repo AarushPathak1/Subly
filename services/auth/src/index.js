@@ -1,5 +1,5 @@
 const express = require("express");
-const { clerkMiddleware, requireAuth, getAuth } = require("@clerk/express");
+const { clerkMiddleware, requireAuth, getAuth, clerkClient } = require("@clerk/express");
 const { Pool } = require("pg");
 const amqp = require("amqplib");
 const crypto = require("crypto");
@@ -251,27 +251,44 @@ app.get("/healthz", (req, res) => {
 
 /**
  * POST /verify-edu
- * Called after Clerk webhook confirms email. Checks if the email domain
- * ends with .edu and marks the user as edu_verified in our DB.
+ * Checks if the AUTHENTICATED Clerk user's verified primary email ends with
+ * .edu and marks the user as edu_verified in our DB. The request body's
+ * email (if any) is ignored — trusting client input here would let any
+ * signed-in user claim an arbitrary .edu address.
  */
 app.post("/verify-edu", requireAuth(), async (req, res) => {
   const { userId } = getAuth(req);
 
   try {
-    // Clerk stores the primary email on the session claims
-    const email = req.body.email;
-    if (!email) {
-      return res.status(400).json({ error: "email required" });
+    // Soft-deleted accounts cannot re-verify — they stay locked until the 30-day
+    // purge worker runs. Return 403 so the client shows an honest error instead of
+    // a silent 200 that leaves deleted_at intact and /validate still returning 404.
+    const { rows: existing } = await db.query(
+      "SELECT deleted_at FROM users WHERE clerk_id = $1",
+      [userId]
+    );
+    if (existing.length > 0 && existing[0].deleted_at !== null) {
+      return res.status(403).json({ error: "This account has been deleted." });
     }
 
-    const isEdu = email.toLowerCase().endsWith(".edu");
+    const clerkUser = await clerkClient.users.getUser(userId);
+    const primaryEmail = clerkUser.emailAddresses?.find(
+      (e) => e.id === clerkUser.primaryEmailAddressId
+    );
+
+    if (!primaryEmail || primaryEmail.verification?.status !== "verified") {
+      return res.status(400).json({ error: "No verified primary email found for this account" });
+    }
+
+    const email = primaryEmail.emailAddress.toLowerCase();
+    const isEdu = email.endsWith(".edu");
     const university = isEdu ? lookupUniversity(email) : null;
 
     await db.query(
       `INSERT INTO users (clerk_id, email, edu_verified, university)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (clerk_id) DO UPDATE
-         SET edu_verified = $3, university = $4, updated_at = NOW()`,
+         SET email = $2, edu_verified = $3, university = $4, updated_at = NOW()`,
       [userId, email, isEdu, university]
     );
 
@@ -298,7 +315,7 @@ app.get("/validate", requireAuth(), async (req, res) => {
   const { userId } = getAuth(req);
   try {
     const { rows } = await db.query(
-      "SELECT id, clerk_id, edu_verified FROM users WHERE clerk_id = $1",
+      "SELECT id, clerk_id, edu_verified FROM users WHERE clerk_id = $1 AND deleted_at IS NULL",
       [userId]
     );
     if (!rows.length) return res.status(404).json({ error: "User not found" });
@@ -317,7 +334,7 @@ app.get("/me", requireAuth(), async (req, res) => {
   const { userId } = getAuth(req);
   try {
     const { rows } = await db.query(
-      "SELECT id, clerk_id, email, edu_verified, university, created_at FROM users WHERE clerk_id = $1",
+      "SELECT id, clerk_id, email, edu_verified, university, created_at FROM users WHERE clerk_id = $1 AND deleted_at IS NULL",
       [userId]
     );
     if (!rows.length) return res.status(404).json({ error: "User not found" });
@@ -336,7 +353,7 @@ app.get("/profile", requireAuth(), async (req, res) => {
   const { userId } = getAuth(req);
   try {
     const { rows: userRows } = await db.query(
-      "SELECT id FROM users WHERE clerk_id = $1",
+      "SELECT id FROM users WHERE clerk_id = $1 AND deleted_at IS NULL",
       [userId]
     );
     if (!userRows.length) return res.status(404).json({ error: "User not found" });
@@ -362,7 +379,7 @@ app.post("/profile", requireAuth(), async (req, res) => {
   const { userId } = getAuth(req);
   try {
     const { rows: userRows } = await db.query(
-      "SELECT id FROM users WHERE clerk_id = $1",
+      "SELECT id FROM users WHERE clerk_id = $1 AND deleted_at IS NULL",
       [userId]
     );
     if (!userRows.length) return res.status(404).json({ error: "User not found" });
@@ -585,9 +602,110 @@ app.post("/invite-request/redeem", requireAuth(), async (req, res) => {
   }
 });
 
+/**
+ * DELETE /me
+ * Authenticated. Soft-deletes the current user immediately (sets deleted_at,
+ * schedules a hard purge 30 days out, and revokes edu verification), and
+ * pauses their active/draft listings. The actual row removal happens later
+ * via purgeDeletedUsers().
+ */
+app.delete("/me", requireAuth(), async (req, res) => {
+  const { userId } = getAuth(req);
+  try {
+    const { rows } = await db.query(
+      `UPDATE users
+       SET deleted_at = NOW(), purge_after = NOW() + INTERVAL '30 days',
+           edu_verified = FALSE, updated_at = NOW()
+       WHERE clerk_id = $1 AND deleted_at IS NULL
+       RETURNING id, deleted_at, purge_after`,
+      [userId]
+    );
+    if (!rows.length) return res.status(404).json({ error: "User not found" });
+
+    const { id, deleted_at, purge_after } = rows[0];
+
+    await db.query(
+      `UPDATE listings SET status = 'paused', updated_at = NOW()
+       WHERE user_id = $1 AND status IN ('active', 'draft')`,
+      [id]
+    );
+
+    res.json({ deleted_at, purge_after });
+  } catch (err) {
+    console.error("[auth] DELETE /me error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * Selects users past their purge_after date, deletes the Clerk-side account
+ * for each (swallowing "not found" — it may already be gone), then
+ * hard-deletes the users row. Dependent rows (listings, user_profiles,
+ * conversations, messages, reviews, saved_listings) cascade automatically
+ * via ON DELETE CASCADE foreign keys. One user's failure doesn't abort the
+ * batch.
+ */
+async function purgeDeletedUsers({ limit = 100 } = {}) {
+  const results = { purged: 0, failed: 0 };
+
+  const { rows } = await db.query(
+    `SELECT id, clerk_id FROM users
+     WHERE deleted_at IS NOT NULL AND purge_after <= NOW()
+     ORDER BY purge_after ASC
+     LIMIT $1`,
+    [limit]
+  );
+
+  for (const user of rows) {
+    try {
+      try {
+        await clerkClient.users.deleteUser(user.clerk_id);
+      } catch (err) {
+        if (err?.status !== 404) throw err;
+      }
+
+      await db.query("DELETE FROM users WHERE id = $1", [user.id]);
+      results.purged += 1;
+    } catch (err) {
+      results.failed += 1;
+      console.error(`[auth] purge failed for user ${user.id}:`, err);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * POST /internal/purge-deleted
+ * Internal-only. Gated by X-Internal-Secret, mirroring the gateway's
+ * internal-call convention. Lets an operator trigger an out-of-band purge.
+ */
+app.post("/internal/purge-deleted", (req, res, next) => {
+  if (req.headers["x-internal-secret"] !== process.env.INTERNAL_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  next();
+}, async (req, res) => {
+  try {
+    const result = await purgeDeletedUsers({ limit: req.body?.limit });
+    res.json(result);
+  } catch (err) {
+    console.error("[auth] /internal/purge-deleted error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+const PURGE_INTERVAL_MS = Number(process.env.PURGE_INTERVAL_MS) || 6 * 60 * 60 * 1000; // 6 hours
+
+function startPurgeWorker() {
+  setInterval(() => {
+    purgeDeletedUsers().catch((err) => console.error("[auth] purge worker error:", err));
+  }, PURGE_INTERVAL_MS);
+}
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 if (require.main === module) {
-  const required = ["DATABASE_URL", "RABBITMQ_URL", "CLERK_SECRET_KEY", "INVITE_SECRET", "ADMIN_SECRET"];
+  const required = ["DATABASE_URL", "RABBITMQ_URL", "CLERK_SECRET_KEY", "INVITE_SECRET", "ADMIN_SECRET", "INTERNAL_SECRET"];
   const missing = required.filter((k) => !process.env[k]);
   if (missing.length) {
     console.error(`[auth] missing required env vars: ${missing.join(", ")}`);
@@ -597,6 +715,7 @@ if (require.main === module) {
     console.warn("[auth] RESEND_API_KEY not set — email notifications disabled");
   }
   connectMQ().catch(console.error);
+  startPurgeWorker();
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => console.log(`[auth] listening on :${PORT}`));
 }
@@ -607,4 +726,6 @@ module.exports = {
   sendMatchConfirmedEmail,
   sendListingExpiredEmail,
   consumeNotifications,
+  purgeDeletedUsers,
+  startPurgeWorker,
 };

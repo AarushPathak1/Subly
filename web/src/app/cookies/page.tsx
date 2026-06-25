@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SublyLogo } from "@/components/SublyLogo";
+import { LegalNav } from "@/components/LegalNav";
 
 export const metadata = { title: "Cookie Policy — Subly" };
 
@@ -15,16 +16,7 @@ const sections = [
 export default function CookiesPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/30">
-      <header className="border-b border-slate-100 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
-          <Link href="/" className="flex items-center gap-2">
-            <SublyLogo size={28} />
-            <span className="font-semibold text-slate-900">Subly</span>
-          </Link>
-          <span className="text-slate-300 mx-2">/</span>
-          <span className="text-sm text-slate-500">Cookie Policy</span>
-        </div>
-      </header>
+      <LegalNav pageLabel="Cookie Policy" />
 
       <div className="max-w-6xl mx-auto px-6 py-12">
         <div className="lg:grid lg:grid-cols-[1fr_2.4fr_1fr] lg:gap-12">

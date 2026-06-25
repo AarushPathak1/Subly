@@ -36,7 +36,7 @@ func buildRoutes(authURL, listingsURL, matchingURL *url.URL) []route {
 // deliberately excluded — it backs unauthenticated landing-page data
 // (GET /public/reviews, GET /public/stats).
 func requiresAuth(prefix string) bool {
-	return prefix == "/api/listings" || prefix == "/api/messages"
+	return prefix == "/api/listings" || prefix == "/api/messages" || prefix == "/api/matching"
 }
 
 func mustParseURL(log *logger.Logger, raw string) *url.URL {
@@ -150,7 +150,10 @@ func main() {
 		proxy := newReverseProxy(log, rt.upstream)
 		var h http.Handler = http.StripPrefix(prefix, proxy)
 		if requiresAuth(prefix) {
+			h = authRateLimitMiddleware(h)
 			h = authMiddleware(authURL.String(), internalSecret, h)
+		} else {
+			h = publicRateLimitMiddleware(internalSecret, h)
 		}
 		mux.Handle(prefix+"/", h)
 	}

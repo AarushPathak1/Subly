@@ -14,7 +14,7 @@ from typing import Optional
 import aio_pika
 import psycopg2
 from psycopg2 import pool as pg_pool
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from openai import OpenAI
 from pinecone import Pinecone
 from pydantic import BaseModel, Field
@@ -224,13 +224,23 @@ def health():
 
 
 @app.get("/matches/{user_id}", response_model=list[MatchResult])
-def get_matches(user_id: str):
+def get_matches(user_id: str, x_user_id: Optional[str] = Header(default=None)):
     """
     Fetch a user's preferences from user_profiles, synthesize a vibe query,
     and return the top 5 semantically similar listings from Pinecone.
     Hard filters on university, rent, and bedrooms narrow the candidate set
     before vector similarity re-ranks it.
+
+    The gateway injects X-User-ID for authenticated callers; this service is
+    never reachable directly from the internet. We defensively require it
+    (401 if missing) and reject any caller asking for a user_id other than
+    their own (403).
     """
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Missing X-User-ID header")
+    if x_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Cannot access another user's matches")
+
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -324,8 +334,15 @@ def search(req: SearchRequest):
 
 
 @app.post("/embed/{listing_id}")
-async def trigger_embed(listing_id: str):
-    """Manually trigger embedding for a listing (useful for backfills)."""
+async def trigger_embed(listing_id: str, x_internal_call: Optional[str] = Header(default=None)):
+    """
+    Manually trigger embedding for a listing (useful for backfills). Re-embedding
+    calls OpenAI and Pinecone, so this must not be triggerable by an arbitrary
+    caller. Only internal/server-to-server calls (X-Internal-Call: true, set by
+    the gateway after validating X-Internal-Secret) may proceed.
+    """
+    if x_internal_call != "true":
+        raise HTTPException(status_code=403, detail="Internal endpoint")
     await embed_listing(listing_id)
     return {"listing_id": listing_id, "status": "embedded"}
 

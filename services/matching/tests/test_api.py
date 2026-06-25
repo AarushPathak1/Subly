@@ -73,6 +73,26 @@ class TestSearchEndpoint:
 
 
 class TestMatchesEndpoint:
+    def test_matches_returns_401_when_x_user_id_missing(self):
+        """
+        /matches/{user_id} returns 401 when the gateway-injected X-User-ID
+        header is missing entirely (defensive — shouldn't happen behind the
+        gateway, but this service must not trust an unauthenticated caller).
+        """
+        resp = client.get("/matches/user-no-profile")
+        assert resp.status_code == 401
+
+    def test_matches_returns_403_when_user_id_mismatch(self):
+        """
+        /matches/{user_id} returns 403 when the URL's user_id doesn't match
+        the authenticated caller's X-User-ID header.
+        """
+        resp = client.get(
+            "/matches/someone-elses-id",
+            headers={"X-User-ID": "user-no-profile"},
+        )
+        assert resp.status_code == 403
+
     def test_matches_returns_404_when_no_profile(self):
         """
         /matches/{user_id} returns 404 when the user has no profile in the DB.
@@ -85,12 +105,16 @@ class TestMatchesEndpoint:
         mock_conn.cursor.return_value.__exit__.return_value = False
 
         with patch.object(matching_main, "get_db", return_value=mock_conn):
-            resp = client.get("/matches/user-no-profile")
+            resp = client.get(
+                "/matches/user-no-profile",
+                headers={"X-User-ID": "user-no-profile"},
+            )
         assert resp.status_code == 404
 
     def test_matches_returns_list_for_known_user(self):
         """
-        /matches/{user_id} returns a list when user profile exists.
+        /matches/{user_id} returns a list when user profile exists and the
+        X-User-ID header matches the requested user_id.
         """
         fake_embedding = [0.5] * 1536
 
@@ -125,10 +149,35 @@ class TestMatchesEndpoint:
             with patch.object(matching_main, "embed_text", return_value=fake_embedding):
                 with patch.object(matching_main, "index") as mock_idx:
                     mock_idx.query.return_value = pinecone_results
-                    resp = client.get("/matches/user-with-profile")
+                    resp = client.get(
+                        "/matches/user-with-profile",
+                        headers={"X-User-ID": "user-with-profile"},
+                    )
 
         assert resp.status_code == 200
         results = resp.json()
         assert isinstance(results, list)
         assert results[0]["listing_id"] == "listing-xyz"
         assert results[0]["scam_score"] == 0.1
+
+
+class TestEmbedEndpoint:
+    def test_embed_without_internal_header_returns_403(self):
+        resp = client.post("/embed/listing-abc")
+        assert resp.status_code == 403
+
+    def test_embed_with_wrong_internal_header_value_returns_403(self):
+        resp = client.post("/embed/listing-abc", headers={"X-Internal-Call": "false"})
+        assert resp.status_code == 403
+
+    def test_embed_with_internal_header_succeeds(self):
+        with patch.object(matching_main, "embed_listing", new=MagicMock()) as mock_embed:
+            async def _noop(*args, **kwargs):
+                return None
+            mock_embed.side_effect = _noop
+            resp = client.post(
+                "/embed/listing-abc",
+                headers={"X-Internal-Call": "true"},
+            )
+        assert resp.status_code == 200
+        assert resp.json() == {"listing_id": "listing-abc", "status": "embedded"}

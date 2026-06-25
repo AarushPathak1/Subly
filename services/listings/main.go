@@ -183,10 +183,10 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	const selectCols = `SELECT id, user_id, title, description, address, university_near,
-	              rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
-	              amenities, images, status, scam_score, view_count, created_at, updated_at
-	              FROM listings`
+	const selectCols = `SELECT l.id, l.user_id, l.title, l.description, l.address, l.university_near,
+	              l.rent_cents, l.available_from::text, l.available_to::text, l.bedrooms, l.bathrooms,
+	              l.amenities, l.images, l.status, l.scam_score, l.view_count, l.created_at, l.updated_at
+	              FROM listings l JOIN users u ON u.id = l.user_id`
 
 	userID := r.URL.Query().Get("user_id")
 	var query string
@@ -194,15 +194,15 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	if userID != "" {
 		requestingUserID := r.Header.Get("X-User-ID")
 		if requestingUserID != "" && requestingUserID != userID {
-			// Public profile view: only show active listings
-			query = selectCols + ` WHERE user_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 100`
+			// Public profile view: only show active listings from a non-deleted owner
+			query = selectCols + ` WHERE l.user_id = $1 AND l.status = 'active' AND u.deleted_at IS NULL ORDER BY l.created_at DESC LIMIT 100`
 		} else {
-			// Own listings: show all statuses
-			query = selectCols + ` WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`
+			// Own listings: show all statuses regardless of (own) deletion state
+			query = selectCols + ` WHERE l.user_id = $1 ORDER BY l.created_at DESC LIMIT 100`
 		}
 		args = []any{userID}
 	} else {
-		query = selectCols + ` WHERE status = 'active' ORDER BY created_at DESC LIMIT 50`
+		query = selectCols + ` WHERE l.status = 'active' AND u.deleted_at IS NULL ORDER BY l.created_at DESC LIMIT 50`
 	}
 
 	rows, err := s.db.Query(ctx, query, args...)
@@ -314,6 +314,14 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	l.Description, l.UniversityNear, l.AvailableTo = description.String, universityNear.String, availableTo.String
 	if userID != l.UserID {
 		l.ScamScore = 0
+
+		var ownerDeleted bool
+		if err := s.db.QueryRow(r.Context(),
+			`SELECT deleted_at IS NOT NULL FROM users WHERE id = $1`, l.UserID,
+		).Scan(&ownerDeleted); err == nil && ownerDeleted {
+			writeErr(w, r, http.StatusNotFound, fmt.Errorf("listing not found"))
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, l)
 }
@@ -497,7 +505,12 @@ func (s *server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		SELECT
 			c.id, c.listing_id, l.title,
 			c.renter_id, c.lister_id,
-			CASE WHEN c.renter_id = $1 THEN ul.email ELSE ur.email END,
+			CASE
+				WHEN c.renter_id = $1 AND ul.deleted_at IS NOT NULL THEN '[deleted user]'
+				WHEN c.lister_id = $1 AND ur.deleted_at IS NOT NULL THEN '[deleted user]'
+				WHEN c.renter_id = $1 THEN ul.email
+				ELSE ur.email
+			END,
 			c.last_message_at, c.created_at,
 			COALESCE(m.body, ''),
 			COALESCE(unread.cnt, 0)::int
@@ -555,7 +568,12 @@ func (s *server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	err := s.db.QueryRow(r.Context(), `
 		SELECT c.id, c.listing_id, l.title,
 		       c.renter_id, c.lister_id,
-		       CASE WHEN c.renter_id = $2 THEN ul.email ELSE ur.email END,
+		       CASE
+		           WHEN c.renter_id = $2 AND ul.deleted_at IS NOT NULL THEN '[deleted user]'
+		           WHEN c.lister_id = $2 AND ur.deleted_at IS NOT NULL THEN '[deleted user]'
+		           WHEN c.renter_id = $2 THEN ul.email
+		           ELSE ur.email
+		       END,
 		       c.last_message_at, c.created_at, '', 0,
 		       c.initial_rent_cents, c.confirmed_at
 		FROM conversations c

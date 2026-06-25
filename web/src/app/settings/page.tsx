@@ -2,6 +2,7 @@ import { requireEduVerified } from "@/lib/auth";
 import { auth } from "@clerk/nextjs/server";
 import { AppNav } from "@/components/AppNav";
 import VibeForm from "@/app/onboarding/VibeForm";
+import { DeleteAccountSection } from "@/components/DeleteAccountSection";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -43,6 +44,8 @@ export default async function SettingsPage() {
               } : undefined}
             />
           </div>
+
+          <DeleteAccountSection />
         </div>
       </div>
     </div>

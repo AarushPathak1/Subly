@@ -10,9 +10,15 @@ CREATE TABLE IF NOT EXISTS users (
     email       TEXT UNIQUE NOT NULL,
     edu_verified BOOLEAN DEFAULT FALSE,
     university  TEXT,
+    deleted_at  TIMESTAMPTZ,
+    purge_after TIMESTAMPTZ,
     created_at  TIMESTAMPTZ DEFAULT NOW(),
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS users_purge_after_idx
+    ON users(purge_after)
+    WHERE deleted_at IS NOT NULL;
 
 -- ─── Listings ───────────────────────────────────────────────────────────────
 CREATE TYPE listing_status AS ENUM ('draft', 'active', 'paused', 'leased', 'expired');

@@ -84,7 +84,7 @@ func TestRequiresAuth_TableDriven(t *testing.T) {
 		{"/api/public", false},
 		{"/api/listings", true},
 		{"/api/messages", true},
-		{"/api/matching", false},
+		{"/api/matching", true},
 	}
 	for _, c := range cases {
 		if got := requiresAuth(c.prefix); got != c.want {
@@ -261,6 +261,50 @@ func TestRouteTable_InternalSecretStillBypassesListingsAuth(t *testing.T) {
 	}
 	if !*called["/api/listings"] {
 		t.Error("expected /api/listings upstream to have been called via internal-secret bypass")
+	}
+}
+
+// TestRouteTable_MatchingPrefixRequiresAuth confirms /api/matching/* is
+// wrapped by authMiddleware and rejects requests with no Authorization
+// header before ever reaching the upstream (the matching service used to be
+// fully open to the internet).
+func TestRouteTable_MatchingPrefixRequiresAuth(t *testing.T) {
+	auth := newOKAuthServer("user-1", true) // would succeed if consulted
+	defer auth.Close()
+
+	mux, called := buildTestMux(t, auth.URL, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/matching/matches/user-1", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for /api/matching/* with no Authorization header, got %d", w.Code)
+	}
+	if *called["/api/matching"] {
+		t.Error("upstream should not have been called without auth")
+	}
+}
+
+// TestRouteTable_MatchingPrefixWithValidAuth_ReachesUpstream is the
+// complementary happy-path check: a valid bearer token DOES reach the
+// upstream for /api/matching/*.
+func TestRouteTable_MatchingPrefixWithValidAuth_ReachesUpstream(t *testing.T) {
+	auth := newOKAuthServer("user-1", true)
+	defer auth.Close()
+
+	mux, called := buildTestMux(t, auth.URL, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/matching/matches/user-1", nil)
+	req.Header.Set("Authorization", "Bearer good-token")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 with valid auth, got %d", w.Code)
+	}
+	if !*called["/api/matching"] {
+		t.Error("expected /api/matching upstream to have been called with valid auth")
 	}
 }
 

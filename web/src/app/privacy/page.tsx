@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SublyLogo } from "@/components/SublyLogo";
+import { LegalNav } from "@/components/LegalNav";
 
 export const metadata = { title: "Privacy Policy — Subly" };
 
@@ -18,16 +19,7 @@ const sections = [
 export default function PrivacyPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30">
-      <header className="border-b border-slate-100 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
-          <Link href="/" className="flex items-center gap-2">
-            <SublyLogo size={28} />
-            <span className="font-semibold text-slate-900">Subly</span>
-          </Link>
-          <span className="text-slate-300 mx-2">/</span>
-          <span className="text-sm text-slate-500">Privacy Policy</span>
-        </div>
-      </header>
+      <LegalNav pageLabel="Privacy Policy" />
 
       <div className="max-w-6xl mx-auto px-6 py-12">
         <div className="lg:grid lg:grid-cols-[1fr_2.4fr_1fr] lg:gap-12">
@@ -62,7 +54,7 @@ export default function PrivacyPage() {
           {/* Main content */}
           <main>
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Privacy Policy</h1>
-            <p className="text-sm text-slate-500 mb-10">Last updated: June 2026 (revision 2)</p>
+            <p className="text-sm text-slate-500 mb-10">Last updated: June 2026 (revision 3)</p>
 
             <div className="space-y-10 text-slate-700 leading-relaxed">
               <section id="who-we-are">
@@ -220,10 +212,15 @@ export default function PrivacyPage() {
                   listing is deleted. If you delete your account, this data is removed within the same
                   30-day window described above.
                 </p>
-                {/* TODO: legal review — confirm or specify analytics retention period */}
                 <p className="mt-3">
-                  Analytics events held by PostHog and Sentry are retained per their respective default
-                  retention policies; contact us to request deletion of your distinct ID.
+                  PostHog analytics events (see our{" "}
+                  <Link href="/cookies" className="text-indigo-600 hover:underline">
+                    Cookie Policy
+                  </Link>{" "}
+                  for the full list) are retained for up to 12 months from when they are recorded.
+                  Sentry error-monitoring events are retained for up to 90 days. If you delete your
+                  account, we also request deletion of your PostHog distinct ID and Sentry user
+                  identifier within the same 30-day window described above.
                 </p>
               </section>
 

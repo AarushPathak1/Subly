@@ -1,11 +1,12 @@
 "use strict";
 
 // In-memory store for test rows
-const _store = { users: [], invite_requests: [] };
+const _store = { users: [], invite_requests: [], listings: [] };
 
 function resetStore() {
   _store.users = [];
   _store.invite_requests = [];
+  _store.listings = [];
 }
 
 function getStore() { return _store; }
@@ -17,7 +18,17 @@ function addUser(user) {
     email: user.email,
     edu_verified: user.edu_verified ?? true,
     university: user.university || null,
+    deleted_at: user.deleted_at || null,
+    purge_after: user.purge_after || null,
     created_at: new Date(),
+  });
+}
+
+function addListing(listing) {
+  _store.listings.push({
+    id: listing.id || `listing-${Date.now()}`,
+    user_id: listing.user_id,
+    status: listing.status || "active",
   });
 }
 
@@ -84,18 +95,63 @@ async function query(sql, params = []) {
     const [clerk_id, email, edu_verified, university] = params;
     const existing = _store.users.find((u) => u.clerk_id === clerk_id);
     if (existing) {
+      existing.email = email;
       existing.edu_verified = edu_verified;
       existing.university = university;
       return { rows: [existing] };
     }
-    const row = { id: `user-${Date.now()}`, clerk_id, email, edu_verified, university, created_at: new Date() };
+    const row = {
+      id: `user-${Date.now()}`, clerk_id, email, edu_verified, university,
+      deleted_at: null, purge_after: null, created_at: new Date(),
+    };
     _store.users.push(row);
     return { rows: [row] };
   }
 
+  // users DELETE soft-delete (DELETE /me)
+  if (s.startsWith("update users") && s.includes("set deleted_at = now()")) {
+    const [clerk_id] = params;
+    const row = _store.users.find((u) => u.clerk_id === clerk_id && !u.deleted_at);
+    if (!row) return { rows: [] };
+    row.deleted_at = new Date();
+    row.purge_after = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    row.edu_verified = false;
+    return { rows: [{ id: row.id, deleted_at: row.deleted_at, purge_after: row.purge_after }] };
+  }
+
+  // listings UPDATE status=paused (DELETE /me side effect)
+  if (s.startsWith("update listings") && s.includes("set status = 'paused'")) {
+    const [user_id] = params;
+    _store.listings
+      .filter((l) => l.user_id === user_id && (l.status === "active" || l.status === "draft"))
+      .forEach((l) => { l.status = "paused"; });
+    return { rows: [] };
+  }
+
+  // users SELECT due for purge
+  if (s.includes("from users") && s.includes("deleted_at is not null") && s.includes("purge_after")) {
+    const [limit] = params;
+    const rows = _store.users
+      .filter((u) => u.deleted_at && u.purge_after && u.purge_after <= new Date())
+      .sort((a, b) => a.purge_after - b.purge_after)
+      .slice(0, limit)
+      .map((u) => ({ id: u.id, clerk_id: u.clerk_id }));
+    return { rows };
+  }
+
+  // users DELETE (hard purge)
+  if (s.startsWith("delete from users where id")) {
+    const [id] = params;
+    _store.users = _store.users.filter((u) => u.id !== id);
+    return { rows: [] };
+  }
+
   // users SELECT by clerk_id (full)
   if (s.includes("from users where clerk_id")) {
-    const rows = _store.users.filter((u) => u.clerk_id === params[0]);
+    let rows = _store.users.filter((u) => u.clerk_id === params[0]);
+    if (s.includes("deleted_at is null")) {
+      rows = rows.filter((u) => !u.deleted_at);
+    }
     return { rows };
   }
 
@@ -112,4 +168,4 @@ class Pool {
   query(...args) { return query(...args); }
 }
 
-module.exports = { Pool, resetStore, getStore, addUser };
+module.exports = { Pool, resetStore, getStore, addUser, addListing };
