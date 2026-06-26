@@ -291,7 +291,7 @@ def get_matches(user_id: str, x_user_id: Optional[str] = Header(default=None)):
             with conn.cursor() as scam_cur:
                 scam_cur.execute(
                     """SELECT id::text, scam_score, title, address, images
-                       FROM listings WHERE id = ANY(%s)""",
+                       FROM listings WHERE id = ANY(%s::uuid[])""",
                     (listing_ids,),
                 )
                 for row in scam_cur.fetchall():
