@@ -19,6 +19,7 @@ interface MatchResult {
   title: string | null;
   address: string | null;
   image_url: string | null;
+  available_from: string | null;
 }
 
 async function getMatches(userId: string, token: string): Promise<MatchResult[]> {
@@ -33,6 +34,18 @@ async function getMatches(userId: string, token: string): Promise<MatchResult[]>
   } catch {
     return [];
   }
+}
+
+function formatAvailableFrom(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  const currentYear = new Date().getFullYear();
+  const opts: Intl.DateTimeFormatOptions =
+    d.getFullYear() === currentYear
+      ? { month: "short", day: "numeric" }
+      : { month: "short", day: "numeric", year: "numeric" };
+  return `Available ${d.toLocaleDateString("en-US", opts)}`;
 }
 
 function ScoreBadge({ score }: { score: number }) {
@@ -57,6 +70,7 @@ function MatchCard({ match, isSaved }: { match: MatchResult; isSaved: boolean })
   const university = match.university ?? "Unknown University";
   const title = match.title ?? "Sublease listing";
   const subtitle = match.address || university;
+  const availableLabel = formatAvailableFrom(match.available_from);
   const isHighRisk = match.scam_score > 0.7;
   const riskColor = match.scam_score > 0.7 ? "text-red-500" : match.scam_score > 0.4 ? "text-amber-500" : "text-emerald-500";
   const trustLabel = match.scam_score > 0.7 ? "High Risk" : match.scam_score > 0.4 ? "Review" : "Trusted";
@@ -113,6 +127,11 @@ function MatchCard({ match, isSaved }: { match: MatchResult; isSaved: boolean })
           <div>
             <p className="text-base font-extrabold text-slate-900">{rent}</p>
             <p className="text-xs text-slate-400">{beds} bed · {baths} bath</p>
+            {availableLabel && (
+              <p className="text-xs font-semibold text-indigo-600 mt-0.5">
+                {availableLabel}
+              </p>
+            )}
           </div>
         </div>
 

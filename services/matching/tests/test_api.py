@@ -144,7 +144,7 @@ class TestMatchesEndpoint:
 
         scam_cursor = MagicMock()
         scam_cursor.fetchall.return_value = [
-            ("listing-xyz", 0.1, "Cozy 2BR near UT", "123 Main St", ["https://example.com/photo.jpg"])
+            ("listing-xyz", 0.1, "Cozy 2BR near UT", "123 Main St", ["https://example.com/photo.jpg"], "2026-05-15")
         ]
 
         cm_profile = MagicMock()
@@ -185,12 +185,13 @@ class TestMatchesEndpoint:
         assert results[0]["title"] == "Cozy 2BR near UT"
         assert results[0]["address"] == "123 Main St"
         assert results[0]["image_url"] == "https://example.com/photo.jpg"
+        assert results[0]["available_from"] == "2026-05-15"
 
-    def test_matches_includes_null_title_address_image_when_listing_not_found(self):
+    def test_matches_includes_null_fields_when_listing_not_found(self):
         """
         If a Pinecone match's listing_id has no corresponding row in the
-        listings table (e.g. deleted), title/address/image_url should be
-        null rather than raising a KeyError.
+        listings table (e.g. deleted), title/address/image_url/available_from
+        should be null rather than raising a KeyError.
         """
         fake_embedding = [0.5] * 1536
 
@@ -235,6 +236,7 @@ class TestMatchesEndpoint:
         assert results[0]["title"] is None
         assert results[0]["address"] is None
         assert results[0]["image_url"] is None
+        assert results[0]["available_from"] is None
 
 
 class TestEmbedEndpoint:
