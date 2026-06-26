@@ -60,7 +60,7 @@ export default async function MessagesPage() {
               const otherUserId = c.renter_id === user.id ? c.lister_id : c.renter_id;
               return (
                 <div key={c.id} className="flex items-start gap-4 px-5 py-4 hover:bg-slate-50 transition">
-                  <Link href={`/users/${otherUserId}`} className="shrink-0 mt-0.5" onClick={(e) => e.stopPropagation()}>
+                  <Link href={`/users/${otherUserId}`} className="shrink-0 mt-0.5">
                     <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center hover:ring-2 hover:ring-indigo-300 transition">
                       <span className="text-indigo-700 font-bold text-sm">
                         {c.other_email[0].toUpperCase()}
