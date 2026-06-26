@@ -12,9 +12,9 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/s3-request-presigner": "^3.600.0",
-    "@clerk/nextjs": "^5.2.0",
+    "@clerk/nextjs": "^6.39.5",
     "@sentry/nextjs": "^8.40.0",
-    "next": "14.2.4",
+    "next": "14.2.35",
     "posthog-js": "^1.205.0",
     "posthog-node": "^4.10.2",
     "react": "^18.3.1",

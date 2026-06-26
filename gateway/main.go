@@ -59,9 +59,17 @@ func newReverseProxy(log *logger.Logger, target *url.URL) http.Handler {
 // authMiddleware validates the Clerk session via the auth service and injects X-User-ID.
 // Requests without a valid .edu-verified account are rejected before reaching the upstream.
 // Internal service calls authenticated via X-Internal-Secret bypass Clerk validation.
+//
+// X-Internal-Call is ONLY ever set by this middleware itself, after
+// successfully validating X-Internal-Secret below. Any X-Internal-Call value
+// a client supplies directly is stripped unconditionally before that check —
+// otherwise an authenticated user could set X-Internal-Call: true themselves
+// to bypass payment/ownership checks in the upstream services that trust it.
 func authMiddleware(authServiceURL string, internalSecret string, next http.Handler) http.Handler {
 	client := &http.Client{Timeout: 5 * time.Second}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Del("X-Internal-Call")
+
 		// Internal service bypass — webhook and server-to-server calls
 		if internalSecret != "" && r.Header.Get("X-Internal-Secret") == internalSecret {
 			r.Header.Del("X-Internal-Secret")
@@ -69,6 +77,7 @@ func authMiddleware(authServiceURL string, internalSecret string, next http.Hand
 			next.ServeHTTP(w, r)
 			return
 		}
+		r.Header.Del("X-Internal-Secret")
 
 		token := r.Header.Get("Authorization")
 		if token == "" {
@@ -112,6 +121,27 @@ func authMiddleware(authServiceURL string, internalSecret string, next http.Hand
 	})
 }
 
+// stripInternalHeaders unconditionally removes client-supplied
+// X-Internal-Call and X-Internal-Secret headers before any other middleware
+// or handler runs. Without this, any caller could set X-Internal-Call: true
+// themselves to bypass payment/ownership checks downstream and disable rate
+// limiting.
+//
+// This is applied to routes that do NOT pass through authMiddleware (the
+// /api/public prefix) — authMiddleware itself performs the equivalent strip
+// for routes that do, since it must inspect X-Internal-Secret first to
+// decide whether to honor the legitimate internal bypass (e.g. the Stripe
+// webhook calling back into the gateway). Either way, by the time a request
+// reaches publicRateLimitMiddleware/authRateLimitMiddleware or any upstream
+// handler, a client-supplied X-Internal-Call can never survive.
+func stripInternalHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Del("X-Internal-Call")
+		r.Header.Del("X-Internal-Secret")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -151,9 +181,13 @@ func main() {
 		var h http.Handler = http.StripPrefix(prefix, proxy)
 		if requiresAuth(prefix) {
 			h = authRateLimitMiddleware(h)
+			// authMiddleware strips client-supplied X-Internal-Call/Secret
+			// itself (it must inspect X-Internal-Secret first to decide
+			// whether to honor the legitimate internal bypass).
 			h = authMiddleware(authURL.String(), internalSecret, h)
 		} else {
 			h = publicRateLimitMiddleware(internalSecret, h)
+			h = stripInternalHeaders(h)
 		}
 		mux.Handle(prefix+"/", h)
 	}

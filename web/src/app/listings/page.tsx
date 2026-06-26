@@ -23,7 +23,7 @@ interface Listing {
 
 export default async function BrowsePage() {
   const user = await requireEduVerified();
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
 
   let listings: Listing[] = [];

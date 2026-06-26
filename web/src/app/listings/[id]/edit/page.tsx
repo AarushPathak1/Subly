@@ -25,7 +25,7 @@ interface Listing {
 
 export default async function EditListingPage({ params }: { params: { id: string } }) {
   const user = await requireEduVerified();
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
 
   const res = await fetch(`${GATEWAY}/api/listings/listings/${params.id}`, {
@@ -63,7 +63,7 @@ export default async function EditListingPage({ params }: { params: { id: string
         <div className="max-w-5xl mx-auto">
           <p className="text-xs font-semibold text-violet-300 uppercase tracking-widest mb-2">Editing</p>
           <h1 className="text-3xl font-extrabold text-white mb-2">{listing.title}</h1>
-          <p className="text-indigo-200 text-sm">Changes are live immediately. Re-editing won&apos;t re-trigger AI scoring.</p>
+          <p className="text-indigo-200 text-sm">Editing your title, description, address, or rent sends your listing back to review — it will be temporarily unpublished until re-scored.</p>
         </div>
       </div>
 

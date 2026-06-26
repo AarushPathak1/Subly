@@ -9,7 +9,7 @@ const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?
 export default async function NewListingPage() {
   await requireEduVerified();
 
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
 
   const profileRes = await fetch(`${GATEWAY}/api/auth/profile`, {

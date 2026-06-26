@@ -10,6 +10,7 @@ const mockChannel = {
     return Promise.resolve({});
   }),
   ack: jest.fn(),
+  nack: jest.fn(),
 };
 
 const mockConnection = {

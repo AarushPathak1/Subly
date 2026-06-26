@@ -210,6 +210,7 @@ export default function CookiesPage() {
           <Link href="/privacy" className="hover:text-slate-700">Privacy Policy</Link>
           <Link href="/terms" className="hover:text-slate-700">Terms of Service</Link>
           <Link href="/cookies" className="hover:text-slate-700">Cookie Policy</Link>
+          <Link href="/help" className="hover:text-slate-700">Help</Link>
         </div>
       </footer>
     </div>

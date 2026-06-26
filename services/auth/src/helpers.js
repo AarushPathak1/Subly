@@ -48,7 +48,12 @@ function verifySignedToken(token) {
       .createHmac("sha256", secret)
       .update(`${inviteId}:${expiresAtStr}`)
       .digest("hex");
-    if (sig !== expected) return null;
+
+    const sigBuf = Buffer.from(sig, "hex");
+    const expectedBuf = Buffer.from(expected, "hex");
+    if (sigBuf.length !== expectedBuf.length) return null;
+    if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+
     return inviteId;
   } catch {
     return null;

@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { AppNav } from "@/components/AppNav";
 import { fetchUserProfile, fetchReviewsForLister, fetchReviewSummary } from "@/lib/actions";
 import { ReviewsSection } from "@/components/ReviewsSection";
+import { ReportButton } from "@/components/ReportButton";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -69,7 +70,7 @@ function ListingCard({ listing }: { listing: Listing }) {
 
 export default async function UserProfilePage({ params }: { params: { id: string } }) {
   await requireEduVerified();
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
 
   const [profile, listingsRes, reviews, reviewSummary] = await Promise.all([
@@ -119,6 +120,10 @@ export default async function UserProfilePage({ params }: { params: { id: string
                 <p className="text-sm text-slate-400 italic">No preferences listed yet.</p>
               )}
             </div>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <ReportButton targetKind="user" targetId={params.id} label="Report user" />
           </div>
         </div>
 

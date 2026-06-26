@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -270,6 +271,151 @@ func TestIntegration_ListConversations(t *testing.T) {
 	}
 }
 
+// ── UnreadCount (H10) ──────────────────────────────────────────────────────────
+
+func TestHandleUnreadCount_MissingUserID(t *testing.T) {
+	s := &server{}
+	req := httptest.NewRequest(http.MethodGet, "/conversations/unread_count", nil)
+	w := httptest.NewRecorder()
+	s.handleUnreadCount(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestIntegration_UnreadCount_ZeroWhenNoMessages(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
+	s := &server{db: db}
+
+	req := httptest.NewRequest(http.MethodGet, "/conversations/unread_count", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+	s.handleUnreadCount(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]int
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["count"] != 0 {
+		t.Errorf("expected count=0, got %d", resp["count"])
+	}
+}
+
+func TestIntegration_UnreadCount_CountsMessagesFromOtherParty(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	convID := seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
+	s := &server{db: db}
+
+	// Lister sends 2 messages to the renter (testUserID).
+	for i := 0; i < 2; i++ {
+		body := `{"body":"hello"}`
+		req := httptest.NewRequest(http.MethodPost, "/conversations/"+convID+"/messages", bytes.NewBufferString(body))
+		req.SetPathValue("id", convID)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", testListerID)
+		w := httptest.NewRecorder()
+		s.handleSendMessage(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 sending message, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/conversations/unread_count", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+	s.handleUnreadCount(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]int
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["count"] != 2 {
+		t.Errorf("expected count=2, got %d", resp["count"])
+	}
+}
+
+func TestIntegration_UnreadCount_ExcludesOwnMessages(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	convID := seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
+	s := &server{db: db}
+
+	body := `{"body":"hello from me"}`
+	req := httptest.NewRequest(http.MethodPost, "/conversations/"+convID+"/messages", bytes.NewBufferString(body))
+	req.SetPathValue("id", convID)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+	s.handleSendMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 sending message, got %d: %s", w.Code, w.Body.String())
+	}
+
+	countReq := httptest.NewRequest(http.MethodGet, "/conversations/unread_count", nil)
+	countReq.Header.Set("X-User-ID", testUserID)
+	cw := httptest.NewRecorder()
+	s.handleUnreadCount(cw, countReq)
+
+	var resp map[string]int
+	json.NewDecoder(cw.Body).Decode(&resp)
+	if resp["count"] != 0 {
+		t.Errorf("expected count=0 (own messages don't count as unread), got %d", resp["count"])
+	}
+}
+
+func TestIntegration_UnreadCount_ZeroAfterMarkingRead(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	convID := seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
+	s := &server{db: db}
+
+	body := `{"body":"hello"}`
+	sendReq := httptest.NewRequest(http.MethodPost, "/conversations/"+convID+"/messages", bytes.NewBufferString(body))
+	sendReq.SetPathValue("id", convID)
+	sendReq.Header.Set("Content-Type", "application/json")
+	sendReq.Header.Set("X-User-ID", testListerID)
+	sw := httptest.NewRecorder()
+	s.handleSendMessage(sw, sendReq)
+	if sw.Code != http.StatusCreated {
+		t.Fatalf("expected 201 sending message, got %d: %s", sw.Code, sw.Body.String())
+	}
+
+	// Mark read via GetMessages (the existing read-marking side effect).
+	readReq := httptest.NewRequest(http.MethodGet, "/conversations/"+convID+"/messages", nil)
+	readReq.SetPathValue("id", convID)
+	readReq.Header.Set("X-User-ID", testUserID)
+	rw := httptest.NewRecorder()
+	s.handleGetMessages(rw, readReq)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected 200 marking read, got %d: %s", rw.Code, rw.Body.String())
+	}
+
+	countReq := httptest.NewRequest(http.MethodGet, "/conversations/unread_count", nil)
+	countReq.Header.Set("X-User-ID", testUserID)
+	cw := httptest.NewRecorder()
+	s.handleUnreadCount(cw, countReq)
+
+	var resp map[string]int
+	json.NewDecoder(cw.Body).Decode(&resp)
+	if resp["count"] != 0 {
+		t.Errorf("expected count=0 after marking read, got %d", resp["count"])
+	}
+}
+
 func TestIntegration_GetConversation(t *testing.T) {
 	db := requireDB(t)
 	seedTestUser(t, db)
@@ -297,6 +443,91 @@ func TestIntegration_GetConversation(t *testing.T) {
 	}
 	if conv.ConfirmedAt != nil {
 		t.Error("expected confirmed_at to be nil for new conversation")
+	}
+}
+
+// TestIntegration_GetConversation_MasksEmailBeforeConfirmation is the H9
+// regression test: before a match is confirmed, other_email must be the
+// username portion only (no @domain), never the full .edu email.
+func TestIntegration_GetConversation_MasksEmailBeforeConfirmation(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	convID := seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
+	s := &server{db: db}
+
+	req := httptest.NewRequest(http.MethodGet, "/conversations/"+convID, nil)
+	req.SetPathValue("id", convID)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+	s.handleGetConversation(w, req)
+
+	var conv Conversation
+	json.NewDecoder(w.Body).Decode(&conv)
+	if conv.OtherEmail != "lister" {
+		t.Errorf("expected masked other_email='lister', got %q", conv.OtherEmail)
+	}
+	if strings.Contains(conv.OtherEmail, "@") {
+		t.Errorf("expected other_email to not contain '@' before confirmation, got %q", conv.OtherEmail)
+	}
+}
+
+// TestIntegration_GetConversation_ShowsFullEmailAfterConfirmation confirms
+// the full email IS shown once confirmed_at is set.
+func TestIntegration_GetConversation_ShowsFullEmailAfterConfirmation(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	convID := seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
+	s := &server{db: db}
+
+	confirmReq := httptest.NewRequest(http.MethodPost, "/conversations/"+convID+"/confirm", bytes.NewBufferString(`{"stripe_session_id":"sess_test123"}`))
+	confirmReq.SetPathValue("id", convID)
+	confirmReq.Header.Set("Content-Type", "application/json")
+	confirmReq.Header.Set("X-User-ID", testListerID)
+	cw := httptest.NewRecorder()
+	s.handleConfirmConversation(cw, confirmReq)
+	if cw.Code != http.StatusOK {
+		t.Fatalf("expected 200 confirming, got %d: %s", cw.Code, cw.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/conversations/"+convID, nil)
+	req.SetPathValue("id", convID)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+	s.handleGetConversation(w, req)
+
+	var conv Conversation
+	json.NewDecoder(w.Body).Decode(&conv)
+	if conv.OtherEmail != "lister@university.edu" {
+		t.Errorf("expected full other_email after confirmation, got %q", conv.OtherEmail)
+	}
+}
+
+// TestIntegration_ListConversations_MasksEmailBeforeConfirmation is the
+// handleListConversations analog of the masking check above.
+func TestIntegration_ListConversations_MasksEmailBeforeConfirmation(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	seedTestConversation(t, db, listingID, testUserID, testListerID, 120000)
+	s := &server{db: db}
+
+	req := httptest.NewRequest(http.MethodGet, "/conversations", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+	s.handleListConversations(w, req)
+
+	var convs []Conversation
+	json.NewDecoder(w.Body).Decode(&convs)
+	if len(convs) == 0 {
+		t.Fatal("expected at least one conversation")
+	}
+	if convs[0].OtherEmail != "lister" {
+		t.Errorf("expected masked other_email='lister', got %q", convs[0].OtherEmail)
 	}
 }
 

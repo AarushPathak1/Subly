@@ -8,7 +8,7 @@ export default async function SignupCompletePage({
 }: {
   searchParams: { signed?: string };
 }) {
-  const { userId, getToken } = auth();
+  const { userId, getToken } = await auth();
   if (!userId) redirect("/");
 
   const signedToken = searchParams?.signed;

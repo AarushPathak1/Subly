@@ -11,7 +11,9 @@ graph TD
     Browser["Browser\nNext.js 14 App Router"]
 
     subgraph Gateway["Go Gateway :8080"]
-        AUTH_MW["authMiddleware\n(Clerk session → X-User-ID)"]
+        STRIP["stripInternalHeaders\n(deletes client-supplied\nX-Internal-Call/-Secret)"]
+        AUTH_MW["authMiddleware\n(Clerk session → X-User-ID,\nor X-Internal-Secret bypass)"]
+        RATE["rate limiters\n(per-user auth routes,\nper-last-hop-IP public routes)"]
         PROXY["Reverse Proxy"]
     end
 
@@ -25,12 +27,13 @@ graph TD
     subgraph Queues["RabbitMQ"]
         Q1["listings.new"]
         Q2["listing.scam_check"]
+        Q3["notifications.*\n(DLX → dead.notifications)"]
     end
 
     subgraph Storage
         PG[("PostgreSQL 16\nusers · listings\nuser_profiles · conversations\nmessages · invite_requests · reports")]
         PINECONE[("Pinecone\nvector index\n1536-dim cosine")]
-        S3[("AWS S3\nlisting images")]
+        S3[("AWS S3\nlisting images\nMIME + size restricted")]
     end
 
     STRIPE["Stripe\nHosted Checkout"]
@@ -39,34 +42,38 @@ graph TD
     POSTHOG["PostHog\nProduct Analytics"]
     SENTRY["Sentry\nError Tracking"]
 
-    Browser -->|"Bearer token"| AUTH_MW
+    Browser -->|"Bearer token"| STRIP
+    STRIP --> AUTH_MW
     AUTH_MW -->|"validates via /validate"| AUTH
-    AUTH_MW -->|"injects X-User-ID"| PROXY
+    AUTH_MW -->|"injects X-User-ID"| RATE
+    RATE --> PROXY
     PROXY --> AUTH
     PROXY --> LISTINGS
     PROXY --> MATCHING
 
     AUTH -->|"upsert user / invite_requests"| PG
-    AUTH -->|"magic link email"| RESEND
+    AUTH -->|"magic link + notification emails\n(HTML-escaped)"| RESEND
+    AUTH -->|"consume, ack/nack"| Q3
 
     LISTINGS -->|"INSERT listing / conversation / message"| PG
-    LISTINGS -->|"full payload"| Q1
-    LISTINGS -->|"listing_id"| Q2
+    LISTINGS -->|"full payload (create + trust-relevant edits)"| Q1
+    LISTINGS -->|"listing_id (create + trust-relevant edits)"| Q2
+    LISTINGS -->|"publish"| Q3
 
     Q1 -->|"consume"| MATCHING
     MATCHING -->|"embed text"| OPENAI
     MATCHING -->|"upsert vector + metadata"| PINECONE
     MATCHING -->|"UPDATE embedding_id"| PG
     MATCHING -->|"top-5 query"| PINECONE
-    MATCHING -->|"JOIN scam_score"| PG
+    MATCHING -->|"JOIN title/address/image/scam_score"| PG
 
     Q2 -->|"consume"| TRUST
     TRUST -->|"keyword + price check"| PG
     TRUST -->|"LLM tone analysis"| OPENAI
-    TRUST -->|"UPDATE scam_score, status=active"| PG
+    TRUST -->|"UPDATE scam_score, status=active\nWHERE status='draft'"| PG
 
-    Browser -->|"PUT image (pre-signed)"| S3
-    Browser -->|"Checkout redirect"| STRIPE
+    Browser -->|"PUT image (pre-signed,\nMIME-whitelisted, size-capped)"| S3
+    Browser -->|"Checkout redirect (lister-only)"| STRIPE
     STRIPE -->|"session webhook"| Browser
 
     Browser -->|"named events"| POSTHOG
@@ -184,8 +191,10 @@ All statements are idempotent (`IF NOT EXISTS`) except the enum addition in migr
 | `/messages/[id]/confirmed` | Clerk + edu | Post-payment page — verifies Stripe session, marks match confirmed |
 | `/settings` | Clerk + edu | Edit profile preferences (university, budget, vibe text) post-onboarding |
 | `/profile` | Clerk + edu | Redirects to your own `/users/[id]` page |
-| `/users/[id]` | Clerk + edu | Public user profile — member since, their active listings, reviews |
-| `/admin/invites` | Admin only | Review and approve/reject invite requests |
+| `/users/[id]` | Clerk + edu | Public user profile — member since, their active listings, reviews, "Report user" button |
+| `/admin/invites` | Admin only (auth-gated: signed-out users redirected by middleware, non-admins get a 404) | Review and approve/reject invite requests |
+| `/admin/reports` | Admin only (auth-gated: signed-out users redirected by middleware, non-admins get a 404) | Trust & safety moderation queue — view reports, mark reviewed/dismissed/actioned |
+| `/help` | Public | FAQ — matching, trust scoring, match fee, reporting scams, account deletion, contact |
 | `/privacy`, `/terms`, `/cookies` | Public | Legal pages (includes payment terms and Stripe disclosure) |
 
 ---
@@ -222,15 +231,15 @@ Solution: split into two exports in separate files:
 
 After the trust service scored a listing, it updated `scam_score` but never transitioned `status` from `draft` to `active`. The browse page and dashboard only return `status = 'active'` rows, so all listings were permanently invisible.
 
-Fix: the trust service now sets both fields atomically:
+Fix: the trust service now sets both fields atomically, and only when the listing is currently in `draft` — this also prevents the worker from un-pausing or un-leasing a listing that a lister or admin has since moved out of draft:
 ```python
 cur.execute(
-    "UPDATE listings SET scam_score = %s, status = 'active' WHERE id = %s",
+    "UPDATE listings SET scam_score = %s, status = 'active' WHERE id = %s AND status = 'draft'",
     (final, listing_id)
 )
 ```
 
-The trust service owns the `draft → active` transition because it is the only component that knows when scoring is complete.
+The trust service owns the `draft → active` transition because it is the only component that knows when scoring is complete. Editing a listing's trust-relevant fields (title/description/address/rent) resets it back to `draft` so this same path re-scores it before it's visible again.
 
 ### 5. RabbitMQ single-consumer invariant
 
@@ -253,7 +262,7 @@ Fix: strict queue ownership:
 5. On submit, the URL array is sent as plain strings to the Listings Service
 ```
 
-Credentials stay server-side. Each key is namespaced `listings/{uuid}/{sanitized-filename}`. Images are uploaded before form submission; the submit button is disabled while any upload is in flight.
+Credentials stay server-side. Each key is namespaced `listings/{uuid}/{sanitized-filename}`. Images are uploaded before form submission; the submit button is disabled while any upload is in flight. The server-side action rejects any `contentType` outside `image/jpeg|png|webp|gif`, signs the `PutObjectCommand` with an exact `ContentLength` (capped at 10MB) so S3 itself enforces the size limit, and rejects uploads once a listing already has 8 images.
 
 ### 7. Invite-gated signup with HMAC magic links
 
@@ -261,7 +270,25 @@ Credentials stay server-side. Each key is namespaced `listings/{uuid}/{sanitized
 2. Admin approves at `/admin/invites` → HMAC-SHA256 token generated (30-min TTL)
 3. Resend fires magic link email (logs to stdout if `RESEND_API_KEY` is unset)
 4. Visitor clicks link → token validated → Clerk account created → token redeemed
-5. Single-use `redeemed_at` column prevents replay attacks
+5. Single-use `redeemed_at` column prevents replay attacks, and the signature is compared with `crypto.timingSafeEqual` to avoid timing side-channels
+
+---
+
+## Key Security Properties
+
+| Property | Enforced by |
+|---|---|
+| Client-supplied `X-Internal-Call`/`X-Internal-Secret` headers never reach an upstream service or bypass rate limiting | `stripInternalHeaders` middleware (gateway) strips both headers on every public route; `authMiddleware` strips them on every auth-required route before deciding whether to honor a *real* `X-Internal-Secret` |
+| Rate limiting can't be evaded by IP spoofing | `clientIP` keys on the **last** (rightmost) hop of `X-Forwarded-For`, which Railway's ingress appends and a client cannot forge without controlling the proxy — not the spoofable first hop |
+| Only the lister can trigger a Stripe charge / confirm a match | `createCheckoutSession` (web) checks the caller's session user ID against `conversation.lister_id` before creating a Checkout session; the listings service repeats the check server-side |
+| Listing image uploads are restricted to images, capped at 10MB, and capped at 8 per listing | `getPresignedUrl` whitelists MIME types, signs `PutObjectCommand` with an exact `ContentLength`, and checks the existing image count before issuing a URL |
+| Editing a listing's title/description/address/rent invalidates its trust badge | `handleUpdate` (listings service) detects the change, force-resets `status='draft'` and `scam_score=0`, and republishes to `listing.scam_check` + `listings.new` |
+| The trust worker can never silently un-pause or un-lease a listing | the scam-score `UPDATE` only flips `status` when the current value is `draft` (`WHERE status='draft'`) |
+| `/admin/*` pages are inaccessible to non-admins and unauthenticated visitors | `middleware.ts` protects `/admin(.*)`; each admin page additionally checks `ADMIN_USER_IDS` server-side and calls `notFound()` for non-admins |
+| Email notification templates can't be used for HTML/script injection | `escapeHtml` wraps every user-supplied string (e.g. listing title) interpolated into a notification email's HTML body |
+| Failed notification emails are retried via dead-lettering, not silently dropped or retried forever | each `notifications.*` queue declares `x-dead-letter-exchange`/`-routing-key` pointing at `dead.notifications`; consumers `nack(msg, false, false)` on failure instead of always `ack`-ing |
+| Counterparties' raw `.edu` emails aren't exposed before a match is confirmed | `handleListConversations`/`handleGetConversation` return only the email's username portion until `confirmed_at IS NOT NULL` |
+| Invite token signatures are compared in constant time | `verifySignedToken` uses `crypto.timingSafeEqual` instead of `!==` |
 
 ---
 
@@ -269,14 +296,14 @@ Credentials stay server-side. Each key is namespaced `listings/{uuid}/{sanitized
 
 | Layer | Framework | Tests | Coverage |
 |---|---|---|---|
-| Web (all suites) | Vitest + Testing Library | 342+ | Schemas, server actions, ThreadClient, AppNavUI, ReviewsSection, ReportButton, SaveButton, and other components |
-| Auth service | Jest + supertest | 96+ | Invite flow, account deletion, notifications, error handler, log redaction (`logSafeIdentifier`), viewing-responded email |
-| Listings service | Go testing + httptest | 162+ | Conversation lifecycle, reviews, saved listings, reports, access control, idempotency, field capture |
-| Gateway | Go testing + httptest | 55+ | Auth middleware — missing header, auth errors, unverified users, verified user injection |
-| Matching service | pytest + FastAPI TestClient | — | Health, search, and matches endpoints with mocked Pinecone/OpenAI |
-| Trust service | pytest | — | Keyword scoring, formula, score capping |
+| Web (all suites) | Vitest + Testing Library | 363+ | Schemas, server actions, ThreadClient, AppNavUI (incl. mobile drawer), ReviewsSection, ReportButton, SaveButton, MyListingsClient delete flow, middleware route protection, and other components |
+| Auth service | Jest + supertest | 109+ | Invite flow, account deletion, notifications (ack/nack + dead-letter queue), error handler, log redaction (`logSafeIdentifier`), `escapeHtml`, constant-time HMAC comparison, viewing-responded email |
+| Listings service | Go testing + httptest | 184+ | Conversation lifecycle, email masking pre/post confirmation, unread-count endpoint, reviews, saved listings, reports (incl. admin moderation), field validation, trust-relevant-edit re-scoring, access control, idempotency |
+| Gateway | Go testing + httptest | 60+ | Auth middleware, internal-header stripping (client can't forge `X-Internal-Call`), last-hop IP rate limiting, unverified users, verified user injection |
+| Matching service | pytest + FastAPI TestClient | 13 | Health, search (now requires `X-User-ID`), and matches (incl. title/address/image join) endpoints with mocked Pinecone/OpenAI |
+| Trust service | pytest | 17 | Keyword scoring, formula, score capping, draft-only status transition |
 
-<sup>Counts refreshed 2026-06-25.</sup>
+<sup>Counts refreshed 2026-06-26.</sup>
 
 Run web tests: `cd web && npm test`
 
@@ -374,6 +401,12 @@ docker compose up --build web -d
 docker compose down -v
 ```
 
+> **Code changes to `web/` are NOT picked up by a running container automatically.** If you edit anything under `web/src` (or any other service's source), you must rebuild and restart that container before the change takes effect:
+> ```bash
+> docker compose build web && docker compose up -d web
+> ```
+> (Substitute the service name — `gateway`, `listings`, `matching`, `trust`, `auth` — for any other service you've changed.)
+
 ---
 
 ## Project Structure
@@ -386,7 +419,8 @@ subly/
 │   ├── listings/              # Go + pgx — listings, conversations, messages, match confirmation
 │   │   ├── main.go            # All HTTP handlers + RabbitMQ publisher
 │   │   ├── handlers_test.go   # Unit + integration tests (listings)
-│   │   └── conversations_test.go  # Integration tests (conversations, messages, confirm)
+│   │   ├── conversations_test.go  # Integration tests (conversations, messages, confirm, email masking)
+│   │   └── reports_test.go    # Report creation + admin moderation (list/update status)
 │   ├── matching/              # Python + FastAPI — Pinecone embedding + semantic search
 │   └── trust/                 # Python worker — heuristic + LLM fraud scoring + status promotion
 ├── web/                       # Next.js 14 App Router
@@ -399,10 +433,11 @@ subly/
 │       │   ├── messages/          # Inbox + thread (ThreadClient.tsx) + confirmed page
 │       │   ├── onboarding/        # Vibe Check form
 │       │   ├── api/stripe/webhook/  # Stripe webhook handler
-│       │   └── admin/invites/     # Admin invite management
+│       │   ├── help/              # Public FAQ page
+│       │   └── admin/             # Admin invite management + reports moderation (auth-gated)
 │       ├── components/
-│       │   ├── AppNav.tsx         # Async server wrapper — fetches unread count
-│       │   ├── AppNavUI.tsx       # Pure presentational nav — safe in client trees
+│       │   ├── AppNav.tsx         # Async server wrapper — fetches unread count via dedicated endpoint
+│       │   ├── AppNavUI.tsx       # Pure presentational nav (mobile hamburger + drawer) — safe in client trees
 │       │   └── ...
 │       └── lib/
 │           ├── actions.ts         # Server Actions (messaging, Stripe checkout, S3)

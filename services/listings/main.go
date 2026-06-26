@@ -141,6 +141,22 @@ type CreateReportRequest struct {
 	Details    string `json:"details"`
 }
 
+type Report struct {
+	ID            string    `json:"id"`
+	ReporterID    string    `json:"reporter_id"`
+	ReporterEmail string    `json:"reporter_email,omitempty"`
+	TargetKind    string    `json:"target_kind"`
+	TargetID      string    `json:"target_id"`
+	Reason        string    `json:"reason"`
+	Details       string    `json:"details"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type UpdateReportStatusRequest struct {
+	Status string `json:"status"`
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 type server struct {
@@ -160,6 +176,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("DELETE /listings/{id}", s.handleDelete)
 	mux.HandleFunc("POST /conversations", s.handleCreateConversation)
 	mux.HandleFunc("GET /conversations", s.handleListConversations)
+	mux.HandleFunc("GET /conversations/unread_count", s.handleUnreadCount)
 	mux.HandleFunc("GET /conversations/{id}", s.handleGetConversation)
 	mux.HandleFunc("GET /conversations/{id}/messages", s.handleGetMessages)
 	mux.HandleFunc("POST /conversations/{id}/messages", s.handleSendMessage)
@@ -180,6 +197,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /saved", s.handleSaveListing)
 	mux.HandleFunc("DELETE /saved/{listing_id}", s.handleUnsaveListing)
 	mux.HandleFunc("POST /reports", s.handleCreateReport)
+	mux.HandleFunc("GET /reports", s.handleListReports)
+	mux.HandleFunc("PATCH /reports/{id}", s.handleUpdateReportStatus)
 	return mux
 }
 
@@ -240,6 +259,37 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, listings)
 }
 
+// validateListingFields applies shared bounds/length checks to listing
+// create/update payloads. Returns a machine-readable error code (matching
+// the {"error": "..."} shape the handlers already write) or "" if valid.
+// available_from/available_to are passed as strings (possibly empty, meaning
+// "not provided in this request") since both handleCreate and handleUpdate
+// work with string-typed date fields.
+func validateListingFields(title, description, address string, rentCents, bedrooms int, bathrooms float64, availableFrom, availableTo string) string {
+	if rentCents < 10000 || rentCents > 5000000 {
+		return "invalid_rent_cents"
+	}
+	if bedrooms < 0 || bedrooms > 20 {
+		return "invalid_bedrooms"
+	}
+	if bathrooms < 0.0 || bathrooms > 20.0 {
+		return "invalid_bathrooms"
+	}
+	if availableFrom != "" && availableTo != "" && availableTo < availableFrom {
+		return "available_to_before_available_from"
+	}
+	if n := len([]rune(title)); n < 5 || n > 200 {
+		return "invalid_title"
+	}
+	if n := len([]rune(description)); n > 5000 {
+		return "invalid_description"
+	}
+	if n := len([]rune(address)); n < 5 || n > 500 {
+		return "invalid_address"
+	}
+	return ""
+}
+
 func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
@@ -250,6 +300,11 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	var body Listing
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, r, http.StatusBadRequest, err)
+		return
+	}
+
+	if code := validateListingFields(body.Title, body.Description, body.Address, body.RentCents, body.Bedrooms, body.Bathrooms, body.AvailableFrom, body.AvailableTo); code != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": code})
 		return
 	}
 
@@ -357,6 +412,65 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
+
+	// Fetch current trust-relevant fields so we can (a) validate the
+	// resulting merged values and (b) detect whether title/description/
+	// address/rent_cents are actually changing — if so, the listing must be
+	// re-scored and re-embedded before it's allowed to be active again.
+	var curTitle, curDescription, curAddress string
+	var curRentCents int
+	if err := s.db.QueryRow(ctx,
+		`SELECT title, COALESCE(description, ''), address, rent_cents FROM listings WHERE id = $1`, id,
+	).Scan(&curTitle, &curDescription, &curAddress, &curRentCents); err != nil {
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("listing not found"))
+		return
+	}
+
+	newTitle, newDescription, newAddress := curTitle, curDescription, curAddress
+	newRentCents := curRentCents
+	if body.Title != nil {
+		newTitle = *body.Title
+	}
+	if body.Description != nil {
+		newDescription = *body.Description
+	}
+	if body.Address != nil {
+		newAddress = *body.Address
+	}
+	if body.RentCents != nil {
+		newRentCents = *body.RentCents
+	}
+
+	newBedrooms, newBathrooms := 0, 0.0
+	var newAvailableFrom, newAvailableTo string
+	if err := s.db.QueryRow(ctx,
+		`SELECT bedrooms, bathrooms, available_from::text, COALESCE(available_to::text, '') FROM listings WHERE id = $1`, id,
+	).Scan(&newBedrooms, &newBathrooms, &newAvailableFrom, &newAvailableTo); err != nil {
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("listing not found"))
+		return
+	}
+	if body.Bedrooms != nil {
+		newBedrooms = *body.Bedrooms
+	}
+	if body.Bathrooms != nil {
+		newBathrooms = *body.Bathrooms
+	}
+	if body.AvailableFrom != nil {
+		newAvailableFrom = *body.AvailableFrom
+	}
+	if body.AvailableTo != nil {
+		newAvailableTo = *body.AvailableTo
+	}
+
+	if code := validateListingFields(newTitle, newDescription, newAddress, newRentCents, newBedrooms, newBathrooms, newAvailableFrom, newAvailableTo); code != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": code})
+		return
+	}
+
+	trustRelevantChange := newTitle != curTitle || newDescription != curDescription ||
+		newAddress != curAddress || newRentCents != curRentCents
+
 	setClauses := []string{"updated_at = NOW()"}
 	args := []any{}
 	idx := 1
@@ -404,6 +518,16 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		add("status", *body.Status)
 	}
 
+	// A trust-relevant edit invalidates the existing scam score and trust
+	// badge — force the listing back to draft (even if it was active/paused/
+	// leased) and reset scam_score so it can't keep riding a score that no
+	// longer reflects the current content. This overrides any status the
+	// caller explicitly requested in this same request.
+	if trustRelevantChange {
+		add("status", "draft")
+		add("scam_score", 0)
+	}
+
 	// Build WHERE: match id, and if gateway provided X-User-ID enforce ownership
 	where := fmt.Sprintf("id = $%d", idx)
 	args = append(args, id)
@@ -416,7 +540,7 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	q := fmt.Sprintf("UPDATE listings SET %s WHERE %s",
 		joinStrings(setClauses, ", "), where)
 
-	tag, err := s.db.Exec(r.Context(), q, args...)
+	tag, err := s.db.Exec(ctx, q, args...)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, err)
 		return
@@ -425,7 +549,39 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusNotFound, fmt.Errorf("listing not found or not owned by you"))
 		return
 	}
+
+	if trustRelevantChange {
+		s.publishScamCheck(id)
+		l, err := s.fetchListingForEmbedding(ctx, id)
+		if err == nil {
+			s.publishNewListing(l)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+}
+
+// fetchListingForEmbedding reloads the full listing row after an update so
+// the re-embedding payload published to listings.new reflects the
+// post-update content (title/description/etc.), not the stale in-memory
+// values from before the edit.
+func (s *server) fetchListingForEmbedding(ctx context.Context, id string) (Listing, error) {
+	var l Listing
+	var description, universityNear, availableTo sql.NullString
+	err := s.db.QueryRow(ctx,
+		`SELECT id, user_id, title, description, address, university_near,
+		        rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
+		        amenities, images, status, scam_score, view_count, created_at, updated_at
+		   FROM listings WHERE id = $1`, id,
+	).Scan(&l.ID, &l.UserID, &l.Title, &description, &l.Address,
+		&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
+		&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
+		&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt)
+	if err != nil {
+		return Listing{}, err
+	}
+	l.Description, l.UniversityNear, l.AvailableTo = description.String, universityNear.String, availableTo.String
+	return l, nil
 }
 
 func joinStrings(ss []string, sep string) string {
@@ -516,8 +672,10 @@ func (s *server) handleListConversations(w http.ResponseWriter, r *http.Request)
 			CASE
 				WHEN c.renter_id = $1 AND ul.deleted_at IS NOT NULL THEN '[deleted user]'
 				WHEN c.lister_id = $1 AND ur.deleted_at IS NOT NULL THEN '[deleted user]'
-				WHEN c.renter_id = $1 THEN ul.email
-				ELSE ur.email
+				WHEN c.confirmed_at IS NOT NULL AND c.renter_id = $1 THEN ul.email
+				WHEN c.confirmed_at IS NOT NULL THEN ur.email
+				WHEN c.renter_id = $1 THEN SPLIT_PART(ul.email, '@', 1)
+				ELSE SPLIT_PART(ur.email, '@', 1)
 			END,
 			c.last_message_at, c.created_at,
 			COALESCE(m.body, ''),
@@ -563,6 +721,39 @@ func (s *server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, convs)
 }
 
+// handleUnreadCount returns just the total unread-message count across all
+// of the caller's conversations, so AppNav doesn't need to fetch and sum the
+// full conversation list on every page load.
+func (s *server) handleUnreadCount(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+
+	var count int
+	err := s.db.QueryRow(r.Context(), `
+		SELECT COALESCE(SUM(unread.cnt), 0)::int
+		FROM conversations c
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::int AS cnt FROM messages
+			WHERE conversation_id = c.id
+			  AND sender_id != $1
+			  AND created_at > COALESCE(
+				  CASE WHEN c.renter_id = $1 THEN c.renter_read_at ELSE c.lister_read_at END,
+				  '-infinity'::timestamptz
+			  )
+		) unread ON true
+		WHERE c.renter_id = $1 OR c.lister_id = $1`,
+		userID,
+	).Scan(&count)
+	if err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": count})
+}
+
 func (s *server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := r.Header.Get("X-User-ID")
@@ -579,8 +770,10 @@ func (s *server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		       CASE
 		           WHEN c.renter_id = $2 AND ul.deleted_at IS NOT NULL THEN '[deleted user]'
 		           WHEN c.lister_id = $2 AND ur.deleted_at IS NOT NULL THEN '[deleted user]'
-		           WHEN c.renter_id = $2 THEN ul.email
-		           ELSE ur.email
+		           WHEN c.confirmed_at IS NOT NULL AND c.renter_id = $2 THEN ul.email
+		           WHEN c.confirmed_at IS NOT NULL THEN ur.email
+		           WHEN c.renter_id = $2 THEN SPLIT_PART(ul.email, '@', 1)
+		           ELSE SPLIT_PART(ur.email, '@', 1)
 		       END,
 		       c.last_message_at, c.created_at, '', 0,
 		       c.initial_rent_cents, c.confirmed_at
@@ -1151,6 +1344,78 @@ func (s *server) handleCreateReport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
+// handleListReports is an admin-only endpoint reached via the gateway's
+// internal-secret bypass — the web app's admin pages call this with
+// X-Internal-Secret (validated by the gateway, which then sets
+// X-Internal-Call: true), the same mechanism used elsewhere in this service
+// for ownership bypass (see handleConfirmConversation).
+func (s *server) handleListReports(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Internal-Call") != "true" {
+		writeErr(w, r, http.StatusForbidden, fmt.Errorf("admin access required"))
+		return
+	}
+
+	rows, err := s.db.Query(r.Context(), `
+		SELECT rp.id, rp.reporter_id, COALESCE(u.email, ''), rp.target_kind, rp.target_id,
+		       rp.reason, rp.details, rp.status, rp.created_at
+		FROM reports rp
+		LEFT JOIN users u ON u.id = rp.reporter_id
+		ORDER BY rp.created_at DESC
+		LIMIT 200`)
+	if err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+	defer rows.Close()
+
+	reports := make([]Report, 0)
+	for rows.Next() {
+		var rep Report
+		if err := rows.Scan(&rep.ID, &rep.ReporterID, &rep.ReporterEmail, &rep.TargetKind,
+			&rep.TargetID, &rep.Reason, &rep.Details, &rep.Status, &rep.CreatedAt); err != nil {
+			writeErr(w, r, http.StatusInternalServerError, err)
+			return
+		}
+		reports = append(reports, rep)
+	}
+	writeJSON(w, http.StatusOK, reports)
+}
+
+// handleUpdateReportStatus is the admin-only counterpart to handleListReports
+// — same X-Internal-Call gate.
+func (s *server) handleUpdateReportStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Internal-Call") != "true" {
+		writeErr(w, r, http.StatusForbidden, fmt.Errorf("admin access required"))
+		return
+	}
+
+	id := r.PathValue("id")
+	var body UpdateReportStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("invalid body"))
+		return
+	}
+	switch body.Status {
+	case "reviewed", "dismissed", "actioned":
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_status"})
+		return
+	}
+
+	var rep Report
+	err := s.db.QueryRow(r.Context(), `
+		UPDATE reports SET status = $1 WHERE id = $2
+		RETURNING id, reporter_id, target_kind, target_id, reason, details, status, created_at`,
+		body.Status, id,
+	).Scan(&rep.ID, &rep.ReporterID, &rep.TargetKind, &rep.TargetID,
+		&rep.Reason, &rep.Details, &rep.Status, &rep.CreatedAt)
+	if err != nil {
+		writeErr(w, r, http.StatusNotFound, fmt.Errorf("report not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
+}
+
 func (s *server) handleReviewEligibility(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
@@ -1627,10 +1892,21 @@ func main() {
 		mqCh, _ = mqConn.Channel()
 		mqCh.QueueDeclare("listing.scam_check", true, false, false, false, nil)
 		mqCh.QueueDeclare("listings.new", true, false, false, false, nil)
-		mqCh.QueueDeclare("notifications.new_message", true, false, false, false, nil)
-		mqCh.QueueDeclare("notifications.match_confirmed", true, false, false, false, nil)
-		mqCh.QueueDeclare("notifications.listing_expired", true, false, false, false, nil)
-		mqCh.QueueDeclare("notifications.viewing_responded", true, false, false, false, nil)
+		// notifications.* are also declared (with the same dead-letter
+		// arguments) by the auth service's consumeNotifications — RabbitMQ
+		// requires identical arguments across declares of the same queue,
+		// or whichever side declares second gets a channel-closing
+		// PRECONDITION_FAILED error. dead.notifications is the DLQ auth
+		// nacks failed notification messages into.
+		mqCh.QueueDeclare("dead.notifications", true, false, false, false, nil)
+		notificationDLXArgs := amqp.Table{
+			"x-dead-letter-exchange":    "",
+			"x-dead-letter-routing-key": "dead.notifications",
+		}
+		mqCh.QueueDeclare("notifications.new_message", true, false, false, false, notificationDLXArgs)
+		mqCh.QueueDeclare("notifications.match_confirmed", true, false, false, false, notificationDLXArgs)
+		mqCh.QueueDeclare("notifications.listing_expired", true, false, false, false, notificationDLXArgs)
+		mqCh.QueueDeclare("notifications.viewing_responded", true, false, false, false, notificationDLXArgs)
 		defer mqConn.Close()
 	}
 

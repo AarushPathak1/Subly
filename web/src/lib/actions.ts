@@ -21,7 +21,7 @@ const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?
 export type ActionState = { error: string } | { toast: string } | null;
 
 async function getBearerToken(): Promise<string | null> {
-  const { getToken } = auth();
+  const { getToken } = await auth();
   return getToken();
 }
 
@@ -171,6 +171,20 @@ export async function updateListing(
   return { toast: "Listing updated successfully" };
 }
 
+// ─── Fetch a single listing ───────────────────────────────────────────────────
+
+export async function fetchListing(listingId: string): Promise<{ images: string[] } | null> {
+  const token = await getBearerToken();
+  if (!token) return null;
+
+  const res = await fetch(`${GATEWAY}/api/listings/listings/${listingId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 // ─── Update listing status ────────────────────────────────────────────────────
 
 export async function updateListingStatus(
@@ -190,6 +204,21 @@ export async function updateListingStatus(
   });
 
   if (!res.ok) return { error: "Failed to update status." };
+  return {};
+}
+
+// ─── Delete listing ───────────────────────────────────────────────────────────
+
+export async function deleteListing(listingId: string): Promise<{ error?: string }> {
+  const token = await getBearerToken();
+  if (!token) return { error: "Not signed in" };
+
+  const res = await fetch(`${GATEWAY}/api/listings/listings/${listingId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) return { error: "Failed to delete listing." };
   return {};
 }
 
@@ -245,6 +274,9 @@ export async function createCheckoutSession(
   if (!conv) return { error: "Conversation not found" };
 
   const user = await getSessionUser();
+  if (!user || user.id !== conv.lister_id) {
+    return { error: "Only the lister can confirm a match." };
+  }
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const fee = calculateMatchFee(conv.initial_rent_cents);
@@ -491,12 +523,32 @@ export async function fetchUserProfile(userId: string): Promise<UserProfile | nu
 
 // ─── S3 pre-signed upload URL ─────────────────────────────────────────────────
 
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_IMAGES_PER_LISTING = 8;
+
 export async function getPresignedUrl(
   filename: string,
-  contentType: string
+  contentType: string,
+  fileSize: number,
+  listingId?: string
 ): Promise<{ url: string; publicUrl: string } | { error: string }> {
   const token = await getBearerToken();
   if (!token) return { error: "Not signed in" };
+
+  if (!ALLOWED_IMAGE_TYPES.includes(contentType)) {
+    return { error: "Invalid file type. Only JPEG, PNG, WebP, and GIF images are allowed." };
+  }
+  if (!Number.isFinite(fileSize) || fileSize < 1 || fileSize > MAX_IMAGE_BYTES) {
+    return { error: "File too large. Maximum size is 10MB." };
+  }
+
+  if (listingId) {
+    const listing = await fetchListing(listingId);
+    if (listing && (listing.images?.length ?? 0) >= MAX_IMAGES_PER_LISTING) {
+      return { error: "Maximum 8 images per listing." };
+    }
+  }
 
   const bucket = process.env.S3_BUCKET_NAME;
   const region = process.env.AWS_REGION;
@@ -509,6 +561,7 @@ export async function getPresignedUrl(
     Bucket: bucket,
     Key: key,
     ContentType: contentType,
+    ContentLength: fileSize,
   });
 
   const url = await getSignedUrl(client, command, { expiresIn: 300 });

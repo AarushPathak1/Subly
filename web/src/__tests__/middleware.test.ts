@@ -53,6 +53,12 @@ describe("middleware protected-route matcher", () => {
     expect(isProtected(fakeRequest("/listings/new"))).toBe(true);
   });
 
+  it("matches /admin and nested admin routes (C2 — gate admin pages behind auth)", () => {
+    expect(isProtected(fakeRequest("/admin"))).toBe(true);
+    expect(isProtected(fakeRequest("/admin/invites"))).toBe(true);
+    expect(isProtected(fakeRequest("/admin/reports"))).toBe(true);
+  });
+
   it("does not match unrelated public routes", () => {
     expect(isProtected(fakeRequest("/"))).toBe(false);
     expect(isProtected(fakeRequest("/listings"))).toBe(false);

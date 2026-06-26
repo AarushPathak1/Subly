@@ -27,7 +27,7 @@ func TestListingsHandlerChain_PanicReturns500(t *testing.T) {
 
 	chain := requestIDMiddleware(recoverMiddleware(testLog, accessLogMiddleware(testLog, s.routes())))
 
-	body := `{"title":"Test","address":"123 St","rent_cents":120000,"available_from":"2026-01-01"}`
+	body := `{"title":"Test Listing Title","address":"123 Main Street, Some City","rent_cents":120000,"available_from":"2026-01-01"}`
 	req := httptest.NewRequest(http.MethodPost, "/listings", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", "user-1")

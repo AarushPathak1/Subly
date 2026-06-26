@@ -18,6 +18,16 @@ function logSafeIdentifier(value) {
   return crypto.createHash("sha256").update(String(value)).digest("hex").slice(0, 8);
 }
 
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function getUserEmail(userId) {
   const { rows } = await db.query("SELECT email FROM users WHERE id = $1", [userId]);
   return rows[0]?.email ?? null;
@@ -38,7 +48,7 @@ async function sendNewMessageEmail({ recipientId, listingTitle, conversationId }
         </div>
         <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">You have a new message</h1>
         <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 24px">
-          Someone sent you a message about <strong>${listingTitle}</strong>. Reply to keep the conversation going.
+          Someone sent you a message about <strong>${escapeHtml(listingTitle)}</strong>. Reply to keep the conversation going.
         </p>
         <a href="${APP_URL}/messages/${conversationId}"
           style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
@@ -75,7 +85,7 @@ async function sendMatchConfirmedEmail({ listerId, renterId, listingTitle, conve
           </div>
           <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">Match confirmed — payment received</h1>
           <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px">
-            Your match for <strong>${listingTitle}</strong> is confirmed. The renter has been notified.
+            Your match for <strong>${escapeHtml(listingTitle)}</strong> is confirmed. The renter has been notified.
           </p>
           <a href="${APP_URL}/messages/${conversationId}"
             style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
@@ -105,7 +115,7 @@ async function sendMatchConfirmedEmail({ listerId, renterId, listingTitle, conve
           </div>
           <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">Your sublease match is confirmed</h1>
           <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px">
-            The lister has officially confirmed your match for <strong>${listingTitle}</strong>. Reach out to coordinate next steps.
+            The lister has officially confirmed your match for <strong>${escapeHtml(listingTitle)}</strong>. Reach out to coordinate next steps.
           </p>
           <a href="${APP_URL}/messages/${conversationId}"
             style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
@@ -136,7 +146,7 @@ async function sendListingExpiredEmail({ listerId, listingId, listingTitle }) {
         </div>
         <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">Your listing has expired</h1>
         <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 24px">
-          <strong>${listingTitle}</strong> has passed its available-until date and is no longer visible to renters.
+          <strong>${escapeHtml(listingTitle)}</strong> has passed its available-until date and is no longer visible to renters.
           If you're still looking for someone, update the dates and repost it — it only takes a minute.
         </p>
         <a href="${APP_URL}/listings/${listingId}/edit"
@@ -173,7 +183,7 @@ async function sendViewingRespondedEmail({ recipientId, listingTitle, conversati
         ` : ""}
         <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">Your viewing proposal was ${status}</h1>
         <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 24px">
-          Your viewing request for <strong>${listingTitle}</strong> was ${status}. Open the conversation to coordinate next steps.
+          Your viewing request for <strong>${escapeHtml(listingTitle)}</strong> was ${status}. Open the conversation to coordinate next steps.
         </p>
         <a href="${APP_URL}/messages/${conversationId}"
           style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
@@ -189,20 +199,26 @@ async function sendViewingRespondedEmail({ recipientId, listingTitle, conversati
 }
 
 async function consumeNotifications(ch) {
-  await ch.assertQueue("notifications.new_message", { durable: true });
-  await ch.assertQueue("notifications.match_confirmed", { durable: true });
-  await ch.assertQueue("notifications.listing_expired", { durable: true });
-  await ch.assertQueue("notifications.viewing_responded", { durable: true });
+  // Dead-letter queue — messages that fail processing are nack'd (without
+  // requeue) so they land here instead of being retried forever or silently
+  // discarded.
+  await ch.assertQueue("dead.notifications", { durable: true });
+
+  const dlxArgs = { "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "dead.notifications" };
+  await ch.assertQueue("notifications.new_message", { durable: true, arguments: dlxArgs });
+  await ch.assertQueue("notifications.match_confirmed", { durable: true, arguments: dlxArgs });
+  await ch.assertQueue("notifications.listing_expired", { durable: true, arguments: dlxArgs });
+  await ch.assertQueue("notifications.viewing_responded", { durable: true, arguments: dlxArgs });
 
   ch.consume("notifications.new_message", async (msg) => {
     if (!msg) return;
     try {
       const { recipient_id, listing_title, conversation_id } = JSON.parse(msg.content.toString());
       await sendNewMessageEmail({ recipientId: recipient_id, listingTitle: listing_title, conversationId: conversation_id });
+      ch.ack(msg);
     } catch (err) {
       console.error("[auth] new_message notification error:", err);
-    } finally {
-      ch.ack(msg);
+      ch.nack(msg, false, false);
     }
   });
 
@@ -211,10 +227,10 @@ async function consumeNotifications(ch) {
     try {
       const { lister_id, renter_id, listing_title, conversation_id } = JSON.parse(msg.content.toString());
       await sendMatchConfirmedEmail({ listerId: lister_id, renterId: renter_id, listingTitle: listing_title, conversationId: conversation_id });
+      ch.ack(msg);
     } catch (err) {
       console.error("[auth] match_confirmed notification error:", err);
-    } finally {
-      ch.ack(msg);
+      ch.nack(msg, false, false);
     }
   });
 
@@ -223,10 +239,10 @@ async function consumeNotifications(ch) {
     try {
       const { lister_id, listing_id, listing_title } = JSON.parse(msg.content.toString());
       await sendListingExpiredEmail({ listerId: lister_id, listingId: listing_id, listingTitle: listing_title });
+      ch.ack(msg);
     } catch (err) {
       console.error("[auth] listing_expired notification error:", err);
-    } finally {
-      ch.ack(msg);
+      ch.nack(msg, false, false);
     }
   });
 
@@ -235,10 +251,10 @@ async function consumeNotifications(ch) {
     try {
       const { recipient_id, listing_title, conversation_id, status } = JSON.parse(msg.content.toString());
       await sendViewingRespondedEmail({ recipientId: recipient_id, listingTitle: listing_title, conversationId: conversation_id, status });
+      ch.ack(msg);
     } catch (err) {
       console.error("[auth] viewing_responded notification error:", err);
-    } finally {
-      ch.ack(msg);
+      ch.nack(msg, false, false);
     }
   });
 
@@ -794,4 +810,5 @@ module.exports = {
   purgeDeletedUsers,
   startPurgeWorker,
   logSafeIdentifier,
+  escapeHtml,
 };

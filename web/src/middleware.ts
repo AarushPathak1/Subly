@@ -6,10 +6,11 @@ const isProtected = createRouteMatcher([
   "/dashboard(.*)",
   "/listings/new(.*)",
   "/settings(.*)",
+  "/admin(.*)",
 ]);
 
-export default clerkMiddleware((auth, req) => {
-  if (isProtected(req)) auth().protect();
+export default clerkMiddleware(async (auth, req) => {
+  if (isProtected(req)) await auth.protect();
 });
 
 export const config = {

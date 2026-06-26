@@ -100,4 +100,20 @@ describe("verifySignedToken", () => {
     process.env.INVITE_SECRET = original;
     expect(result).toBeNull();
   });
+
+  it("returns null when the signature has a different length than expected (constant-time check)", () => {
+    const token = createSignedToken(inviteId);
+    const decoded = Buffer.from(token, "base64url").toString("utf8");
+    const [id, expiresAtStr] = decoded.split(":");
+    const shortSigToken = Buffer.from(`${id}:${expiresAtStr}:abcd`).toString("base64url");
+    expect(verifySignedToken(shortSigToken)).toBeNull();
+  });
+
+  it("uses crypto.timingSafeEqual for signature comparison", () => {
+    const spy = jest.spyOn(require("crypto"), "timingSafeEqual");
+    const token = createSignedToken(inviteId);
+    verifySignedToken(token);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });

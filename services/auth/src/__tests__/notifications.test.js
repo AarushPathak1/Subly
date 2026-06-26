@@ -30,8 +30,13 @@ const LISTING_ID = "listing-uuid-xyz";
 beforeEach(() => {
   resetStore();
   resetConsumers();
-  mockSend.mockClear();
+  // mockClear() only resets call history, not a persistent
+  // mockRejectedValue() set by an earlier test (e.g. the match_confirmed
+  // "nacks on error" test below) — re-affirm the default resolved behavior
+  // so failures don't leak into unrelated tests.
+  mockSend.mockReset().mockResolvedValue({ data: { id: "mock-email-id" }, error: null });
   mockChannel.ack.mockClear();
+  mockChannel.nack.mockClear();
   mockChannel.consume.mockClear();
   mockChannel.assertQueue.mockClear();
   addUser({ id: LISTER_ID, email: "lister@wisc.edu" });
@@ -204,6 +209,24 @@ describe("consumeNotifications", () => {
     expect(queues).toContain("notifications.listing_expired");
   });
 
+  it("asserts a dead.notifications dead-letter queue", () => {
+    const queues = mockChannel.assertQueue.mock.calls.map((c) => c[0]);
+    expect(queues).toContain("dead.notifications");
+  });
+
+  it("declares each notification queue with a dead-letter routing key to dead.notifications", () => {
+    for (const queue of [
+      "notifications.new_message",
+      "notifications.match_confirmed",
+      "notifications.listing_expired",
+      "notifications.viewing_responded",
+    ]) {
+      const call = mockChannel.assertQueue.mock.calls.find((c) => c[0] === queue);
+      expect(call[1].arguments["x-dead-letter-exchange"]).toBe("");
+      expect(call[1].arguments["x-dead-letter-routing-key"]).toBe("dead.notifications");
+    }
+  });
+
   it("registers a consumer for each queue", () => {
     const consumers = getConsumers();
     expect(consumers["notifications.new_message"]).toBeInstanceOf(Function);
@@ -230,7 +253,7 @@ describe("consumeNotifications", () => {
       expect(mockChannel.ack).toHaveBeenCalledWith(msg);
     });
 
-    it("acks even if email send throws", async () => {
+    it("nacks without requeue (dead-letters) if email send throws", async () => {
       mockSend.mockRejectedValueOnce(new Error("Resend down"));
       const msg = makeMsg({
         recipient_id: RENTER_ID,
@@ -239,7 +262,8 @@ describe("consumeNotifications", () => {
         conversation_id: CONV_ID,
       });
       await getConsumers()["notifications.new_message"](msg);
-      expect(mockChannel.ack).toHaveBeenCalledWith(msg);
+      expect(mockChannel.nack).toHaveBeenCalledWith(msg, false, false);
+      expect(mockChannel.ack).not.toHaveBeenCalled();
     });
 
     it("acks and skips gracefully for null message", async () => {
@@ -268,7 +292,7 @@ describe("consumeNotifications", () => {
       expect(mockChannel.ack).toHaveBeenCalledWith(msg);
     });
 
-    it("acks even if email send throws", async () => {
+    it("nacks without requeue (dead-letters) if email send throws", async () => {
       mockSend.mockRejectedValue(new Error("Resend down"));
       const msg = makeMsg({
         lister_id: LISTER_ID,
@@ -277,7 +301,8 @@ describe("consumeNotifications", () => {
         conversation_id: CONV_ID,
       });
       await getConsumers()["notifications.match_confirmed"](msg);
-      expect(mockChannel.ack).toHaveBeenCalledWith(msg);
+      expect(mockChannel.nack).toHaveBeenCalledWith(msg, false, false);
+      expect(mockChannel.ack).not.toHaveBeenCalled();
     });
   });
 
@@ -300,7 +325,7 @@ describe("consumeNotifications", () => {
       expect(mockChannel.ack).toHaveBeenCalledWith(msg);
     });
 
-    it("acks even if email send throws", async () => {
+    it("nacks without requeue (dead-letters) if email send throws", async () => {
       mockSend.mockRejectedValueOnce(new Error("Resend down"));
       const msg = makeMsg({
         lister_id: LISTER_ID,
@@ -308,7 +333,8 @@ describe("consumeNotifications", () => {
         listing_title: "My expired listing",
       });
       await getConsumers()["notifications.listing_expired"](msg);
-      expect(mockChannel.ack).toHaveBeenCalledWith(msg);
+      expect(mockChannel.nack).toHaveBeenCalledWith(msg, false, false);
+      expect(mockChannel.ack).not.toHaveBeenCalled();
     });
   });
 });

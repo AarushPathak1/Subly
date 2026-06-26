@@ -87,8 +87,11 @@ export default function ListingForm({ onImagesChange, initialValues, mode = "cre
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
 
+  const MAX_FILE_BYTES = 10 * 1024 * 1024;
+  const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
   async function uploadToS3(file: File): Promise<string> {
-    const result = await getPresignedUrl(file.name, file.type);
+    const result = await getPresignedUrl(file.name, file.type, file.size, listingId);
     if ("error" in result) throw new Error(result.error);
     const uploadRes = await fetch(result.url, {
       method: "PUT",
@@ -102,6 +105,21 @@ export default function ListingForm({ onImagesChange, initialValues, mode = "cre
   async function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
+
+    for (const file of files) {
+      if (file.size > MAX_FILE_BYTES) {
+        setServerError(`${file.name} is too large. Maximum size is 10MB.`);
+        e.target.value = "";
+        return;
+      }
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        setServerError(`${file.name} is not a supported image type. Use JPEG, PNG, WebP, or GIF.`);
+        e.target.value = "";
+        return;
+      }
+    }
+
+    setServerError(null);
     setUploading(true);
     try {
       const urls = await Promise.all(files.map(uploadToS3));

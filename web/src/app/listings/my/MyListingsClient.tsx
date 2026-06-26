@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { updateListingStatus } from "@/lib/actions";
+import { updateListingStatus, deleteListing } from "@/lib/actions";
 
 interface Listing {
   id: string;
@@ -37,7 +37,7 @@ const STATUS_LABELS: Record<string, string> = {
   expired: "Expired",
 };
 
-function MyListingCard({ listing }: { listing: Listing }) {
+function MyListingCard({ listing, onDeleted }: { listing: Listing; onDeleted: (id: string) => void }) {
   const [isPending, startTransition] = useTransition();
   const [status, setStatus] = useState(listing.status);
   const router = useRouter();
@@ -52,6 +52,19 @@ function MyListingCard({ listing }: { listing: Listing }) {
         setStatus(next);
         toast.success(`Listing ${next === "active" ? "reactivated" : next === "paused" ? "paused" : "marked as leased"}`);
         router.refresh();
+      }
+    });
+  }
+
+  function handleDelete() {
+    if (!window.confirm("Are you sure? This cannot be undone.")) return;
+    startTransition(async () => {
+      const result = await deleteListing(listing.id);
+      if (result.error) {
+        toast.error(result.error);
+      } else {
+        toast.success("Listing deleted");
+        onDeleted(listing.id);
       }
     });
   }
@@ -122,6 +135,24 @@ function MyListingCard({ listing }: { listing: Listing }) {
                 Mark leased
               </button>
             )}
+            <button
+              onClick={handleDelete}
+              disabled={isPending}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition disabled:opacity-50"
+            >
+              Delete
+            </button>
+          </div>
+        )}
+        {(status === "expired" || status === "leased") && (
+          <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-100">
+            <button
+              onClick={handleDelete}
+              disabled={isPending}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition disabled:opacity-50"
+            >
+              Delete
+            </button>
           </div>
         )}
       </div>
@@ -129,7 +160,13 @@ function MyListingCard({ listing }: { listing: Listing }) {
   );
 }
 
-export function MyListingsClient({ listings }: { listings: Listing[] }) {
+export function MyListingsClient({ listings: initialListings }: { listings: Listing[] }) {
+  const [listings, setListings] = useState(initialListings);
+
+  function handleDeleted(id: string) {
+    setListings((prev) => prev.filter((l) => l.id !== id));
+  }
+
   const active   = listings.filter((l) => l.status === "active");
   const drafts   = listings.filter((l) => l.status === "draft");
   const paused   = listings.filter((l) => l.status === "paused");
@@ -173,7 +210,7 @@ export function MyListingsClient({ listings }: { listings: Listing[] }) {
             {label} <span className="text-slate-400 font-normal">({items.length})</span>
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {items.map((l) => <MyListingCard key={l.id} listing={l} />)}
+            {items.map((l) => <MyListingCard key={l.id} listing={l} onDeleted={handleDeleted} />)}
           </div>
         </div>
       ))}

@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { AppNav } from "@/components/AppNav";
 import VibeForm from "@/app/onboarding/VibeForm";
 import { DeleteAccountSection } from "@/components/DeleteAccountSection";
+import Link from "next/link";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const user = await requireEduVerified();
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
 
   const profileRes = await fetch(`${GATEWAY}/api/auth/profile`, {
@@ -46,6 +47,11 @@ export default async function SettingsPage() {
           </div>
 
           <DeleteAccountSection />
+
+          <p className="mt-6 text-center text-sm text-slate-400">
+            Need help? Visit our{" "}
+            <Link href="/help" className="text-indigo-600 hover:underline">Help & FAQ</Link> page.
+          </p>
         </div>
       </div>
     </div>

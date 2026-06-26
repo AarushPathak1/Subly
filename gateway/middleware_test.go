@@ -164,6 +164,38 @@ func TestAuthMiddleware_InternalSecret_WrongSecret_Rejected(t *testing.T) {
 	}
 }
 
+// TestAuthMiddleware_ClientSuppliedInternalCallHeaderIsStripped is the C1
+// regression test: a normally-authenticated request (valid bearer token,
+// no X-Internal-Secret) that also sets X-Internal-Call: true directly must
+// never have that header reach the upstream — only authMiddleware itself,
+// after validating X-Internal-Secret, is allowed to set it.
+func TestAuthMiddleware_ClientSuppliedInternalCallHeaderIsStripped(t *testing.T) {
+	userID := "abc-123"
+	auth := newOKAuthServer(userID, true)
+	defer auth.Close()
+
+	var gotInternalCall string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotInternalCall = r.Header.Get("X-Internal-Call")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mw := authMiddleware(auth.URL, "my-secret", upstream)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/listings", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("X-Internal-Call", "true")
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if gotInternalCall != "" {
+		t.Errorf("expected client-supplied X-Internal-Call to be stripped, but upstream saw %q", gotInternalCall)
+	}
+}
+
 func TestAuthMiddleware_InternalSecret_NotForwardedToUpstream(t *testing.T) {
 	auth := newErrorAuthServer()
 	defer auth.Close()

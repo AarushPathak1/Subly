@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -126,17 +127,25 @@ func getPublicLimiterPool() *rateLimiterPool {
 	return publicLimiterPool
 }
 
-// clientIP extracts the caller's IP, preferring the first hop of
-// X-Forwarded-For (set by upstream proxies/load balancers) and falling back
-// to RemoteAddr.
+// clientIP extracts the caller's IP, preferring the LAST hop of
+// X-Forwarded-For and falling back to RemoteAddr. Railway's ingress always
+// appends the real client IP as the last XFF hop — the client can prepend
+// arbitrary fake IPs to the front of the header, so trusting the first hop
+// (as this used to do) lets an attacker evade IP-based rate limiting simply
+// by sending X-Forwarded-For: 1.2.3.4. If this service is ever moved to a
+// different proxy, verify the XFF trust model before relying on this.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
-		if first := strings.TrimSpace(parts[0]); first != "" {
-			return first
+		if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
+			return last
 		}
 	}
-	return r.RemoteAddr
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // writeRateLimited writes a 429 response with a Retry-After header and a
@@ -152,7 +161,11 @@ func writeRateLimited(w http.ResponseWriter, retryAfterSeconds int) {
 // authRateLimitMiddleware keys on the X-User-ID header injected by
 // authMiddleware, so it must be installed AFTER authMiddleware in the chain.
 // Internal calls (X-Internal-Call: true, set by authMiddleware after
-// validating X-Internal-Secret) bypass the limit entirely.
+// validating X-Internal-Secret) bypass the limit entirely. This bypass is
+// only safe because stripInternalHeaders (main.go) runs before authMiddleware
+// on every route and strips any client-supplied X-Internal-Call header — so
+// by the time this middleware sees X-Internal-Call: true, it can only have
+// been set by authMiddleware itself.
 func authRateLimitMiddleware(next http.Handler) http.Handler {
 	pool := getAuthLimiterPool()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +192,10 @@ func authRateLimitMiddleware(next http.Handler) http.Handler {
 // true (set by authMiddleware after validating X-Internal-Secret, for
 // routes that also pass through authMiddleware), or, since public-prefix
 // routes are never wrapped by authMiddleware, by presenting a valid
-// X-Internal-Secret directly to this middleware.
+// X-Internal-Secret directly to this middleware. Both bypasses depend on
+// stripInternalHeaders (main.go) running before this middleware on every
+// route, so a client can never forge X-Internal-Call: true or guess their
+// way into the X-Internal-Secret check by replaying a stripped header.
 func publicRateLimitMiddleware(internalSecret string, next http.Handler) http.Handler {
 	pool := getPublicLimiterPool()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

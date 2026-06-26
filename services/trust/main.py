@@ -191,8 +191,12 @@ async def run_trust_checks(listing_id: str) -> None:
         final = round(min(1.0, llm * 0.5 + kw * 0.3 + rf * 0.2), 3)
 
         with conn.cursor() as cur:
+            # Only flip draft -> active. A listing that's already
+            # paused/leased/expired by the lister (or an admin) must not be
+            # silently un-paused or un-leased just because a trust re-check
+            # ran (e.g. after a listing edit).
             cur.execute(
-                "UPDATE listings SET scam_score = %s, status = 'active' WHERE id = %s",
+                "UPDATE listings SET scam_score = %s, status = 'active' WHERE id = %s AND status = 'draft'",
                 (final, listing_id),
             )
         log.info(

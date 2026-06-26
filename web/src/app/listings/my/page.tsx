@@ -8,7 +8,7 @@ const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?
 
 export default async function MyListingsPage() {
   const user = await requireEduVerified();
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
 
   let listings: unknown[] = [];

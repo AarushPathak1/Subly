@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
 export async function DELETE() {
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
   if (!token) {
     return NextResponse.json({ error: "Not signed in" }, { status: 401 });

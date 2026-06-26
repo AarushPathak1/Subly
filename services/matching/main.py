@@ -216,6 +216,9 @@ class MatchResult(BaseModel):
     bedrooms: Optional[int] = None
     bathrooms: Optional[float] = None
     scam_score: float = 0.0
+    title: Optional[str] = None
+    address: Optional[str] = None
+    image_url: Optional[str] = None
 
 
 @app.get("/healthz")
@@ -283,13 +286,22 @@ def get_matches(user_id: str, x_user_id: Optional[str] = Header(default=None)):
 
         listing_ids = [m["id"] for m in results["matches"]]
         scam_scores: dict[str, float] = {}
+        listing_details: dict[str, dict] = {}
         if listing_ids:
             with conn.cursor() as scam_cur:
                 scam_cur.execute(
-                    "SELECT id::text, scam_score FROM listings WHERE id = ANY(%s)",
+                    """SELECT id::text, scam_score, title, address, images
+                       FROM listings WHERE id = ANY(%s)""",
                     (listing_ids,),
                 )
-                scam_scores = {row[0]: float(row[1]) for row in scam_cur.fetchall()}
+                for row in scam_cur.fetchall():
+                    listing_id, scam_score, title, address, images = row
+                    scam_scores[listing_id] = float(scam_score)
+                    listing_details[listing_id] = {
+                        "title": title,
+                        "address": address,
+                        "image_url": images[0] if images else None,
+                    }
     finally:
         release_db(conn)
 
@@ -302,14 +314,26 @@ def get_matches(user_id: str, x_user_id: Optional[str] = Header(default=None)):
             bedrooms=m.get("metadata", {}).get("bedrooms"),
             bathrooms=m.get("metadata", {}).get("bathrooms"),
             scam_score=scam_scores.get(m["id"], 0.0),
+            title=listing_details.get(m["id"], {}).get("title"),
+            address=listing_details.get(m["id"], {}).get("address"),
+            image_url=listing_details.get(m["id"], {}).get("image_url"),
         )
         for m in results["matches"]
     ]
 
 
 @app.post("/search", response_model=list[SearchResult])
-def search(req: SearchRequest):
-    """Semantic search over listings — generic, not personalized."""
+def search(req: SearchRequest, x_user_id: Optional[str] = Header(default=None)):
+    """
+    Semantic search over listings — generic, not personalized.
+
+    The gateway injects X-User-ID for authenticated callers; this service is
+    never reachable directly from the internet. We defensively require it
+    (401 if missing), mirroring /matches/{user_id}.
+    """
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Missing X-User-ID header")
+
     query_embedding = embed_text(req.query)
 
     filter_dict = {}

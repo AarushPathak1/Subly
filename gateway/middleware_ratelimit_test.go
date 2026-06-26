@@ -139,33 +139,46 @@ func TestPublicRateLimitMiddleware_KeyedByIP_HonorsXForwardedFor(t *testing.T) {
 	called := 0
 	mw := publicRateLimitMiddleware("", upstreamCounter(&called))
 
+	// Railway's ingress appends the real client IP as the LAST XFF hop, so
+	// the bucket key is the last hop, not the (client-spoofable) first hop.
 	req1 := httptest.NewRequest(http.MethodGet, "/api/public/stats", nil)
 	req1.RemoteAddr = "10.0.0.1:1111"
-	req1.Header.Set("X-Forwarded-For", "9.9.9.9, 10.0.0.1")
+	req1.Header.Set("X-Forwarded-For", "9.9.9.9, 4.4.4.4")
 	w1 := httptest.NewRecorder()
 	mw.ServeHTTP(w1, req1)
 	if w1.Code != http.StatusOK {
-		t.Fatalf("expected first request from 9.9.9.9 to succeed, got %d", w1.Code)
+		t.Fatalf("expected first request from 4.4.4.4 to succeed, got %d", w1.Code)
 	}
 
-	// Same XFF first hop, different RemoteAddr -> should still be the same bucket and now 429.
+	// Same XFF last hop, different first hop and RemoteAddr -> should still be the same bucket and now 429.
 	req2 := httptest.NewRequest(http.MethodGet, "/api/public/stats", nil)
 	req2.RemoteAddr = "10.0.0.2:2222"
-	req2.Header.Set("X-Forwarded-For", "9.9.9.9, 10.0.0.2")
+	req2.Header.Set("X-Forwarded-For", "1.1.1.1, 4.4.4.4")
 	w2 := httptest.NewRecorder()
 	mw.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected second request keyed by same XFF IP to be rate limited, got %d", w2.Code)
+		t.Fatalf("expected second request keyed by same XFF last-hop IP to be rate limited, got %d", w2.Code)
 	}
 
-	// A genuinely different XFF IP gets its own bucket.
+	// A genuinely different XFF last-hop IP gets its own bucket.
 	req3 := httptest.NewRequest(http.MethodGet, "/api/public/stats", nil)
 	req3.RemoteAddr = "10.0.0.3:3333"
-	req3.Header.Set("X-Forwarded-For", "8.8.8.8, 10.0.0.3")
+	req3.Header.Set("X-Forwarded-For", "8.8.8.8, 5.5.5.5")
 	w3 := httptest.NewRecorder()
 	mw.ServeHTTP(w3, req3)
 	if w3.Code != http.StatusOK {
-		t.Fatalf("expected request from a different XFF IP to succeed, got %d", w3.Code)
+		t.Fatalf("expected request from a different XFF last-hop IP to succeed, got %d", w3.Code)
+	}
+
+	// A client spoofing the first hop alone (claiming to be 9.9.9.9) must
+	// not evade the bucket keyed by the real (last-hop) IP 4.4.4.4.
+	req4 := httptest.NewRequest(http.MethodGet, "/api/public/stats", nil)
+	req4.RemoteAddr = "10.0.0.4:4444"
+	req4.Header.Set("X-Forwarded-For", "9.9.9.9, 4.4.4.4")
+	w4 := httptest.NewRecorder()
+	mw.ServeHTTP(w4, req4)
+	if w4.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected spoofed first-hop XFF to still be keyed by real last-hop IP and rate limited, got %d", w4.Code)
 	}
 }
 
@@ -244,22 +257,35 @@ func TestRateLimited429Response_BodyShapeAndRetryAfterHeader(t *testing.T) {
 	}
 }
 
-func TestClientIP_PrefersFirstHopOfXForwardedFor(t *testing.T) {
+func TestClientIP_PrefersLastHopOfXForwardedFor(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.1:1234"
-	req.Header.Set("X-Forwarded-For", "203.0.113.5, 10.0.0.1")
+	req.Header.Set("X-Forwarded-For", "203.0.113.5, 198.51.100.7")
 
-	if got := clientIP(req); got != "203.0.113.5" {
-		t.Errorf("expected 203.0.113.5, got %q", got)
+	if got := clientIP(req); got != "198.51.100.7" {
+		t.Errorf("expected 198.51.100.7 (last hop), got %q", got)
 	}
 }
 
-func TestClientIP_FallsBackToRemoteAddr(t *testing.T) {
+func TestClientIP_IgnoresClientSpoofedFirstHop(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	// A client trying to evade rate limiting by claiming to be a different
+	// IP in the first hop must not succeed — only the last (proxy-appended)
+	// hop is trusted.
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+
+	if got := clientIP(req); got != "1.2.3.4" {
+		t.Errorf("expected 1.2.3.4 (the only/last hop), got %q", got)
+	}
+}
+
+func TestClientIP_FallsBackToRemoteAddrHostWithoutPort(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.1:1234"
 
-	if got := clientIP(req); got != "10.0.0.1:1234" {
-		t.Errorf("expected 10.0.0.1:1234, got %q", got)
+	if got := clientIP(req); got != "10.0.0.1" {
+		t.Errorf("expected 10.0.0.1, got %q", got)
 	}
 }
 

@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 function isAdmin(userId: string | null): boolean {
   if (!userId) return false;
@@ -8,7 +8,7 @@ function isAdmin(userId: string | null): boolean {
 }
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { userId } = auth();
+  const { userId } = await auth();
 
   if (!userId) redirect("/");
 
@@ -41,7 +41,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     );
   }
 
-  if (!isAdmin(userId)) redirect("/dashboard");
+  if (!isAdmin(userId)) notFound();
 
   return <>{children}</>;
 }

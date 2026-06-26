@@ -40,6 +40,8 @@ func buildTestMux(t *testing.T, authURL string, internalSecret string) (mux *htt
 		var h http.Handler = http.StripPrefix(prefix, upstream)
 		if requiresAuth(prefix) {
 			h = authMiddleware(authURL, internalSecret, h)
+		} else {
+			h = stripInternalHeaders(h)
 		}
 		mux.Handle(prefix+"/", h)
 	}
@@ -391,5 +393,127 @@ func TestRouteTable_SavedListingsStripsPrefixBeforeUpstream(t *testing.T) {
 	}
 	if capturedPath != "/saved" {
 		t.Errorf("expected upstream to see stripped path /saved, got %q", capturedPath)
+	}
+}
+
+// ── C1: client-supplied internal headers must never reach upstream ───────────
+
+// TestRouteTable_ClientSuppliedInternalCallHeaderIsStripped confirms that an
+// authenticated user who sets X-Internal-Call: true themselves cannot use it
+// to bypass downstream ownership/payment checks — the header must be deleted
+// before authMiddleware runs and never reach the upstream handler.
+func TestRouteTable_ClientSuppliedInternalCallHeaderIsStripped(t *testing.T) {
+	auth := newOKAuthServer("user-1", true)
+	defer auth.Close()
+
+	mux, _ := buildTestMux(t, auth.URL, "my-secret")
+
+	var gotInternalCall, gotInternalSecret string
+	authU := mustParseURLForTest(t, auth.URL)
+	listingsU := mustParseURLForTest(t, "http://listings.invalid")
+	matchingU := mustParseURLForTest(t, "http://matching.invalid")
+	routes := buildRoutes(authU, listingsU, matchingU)
+
+	mux = http.NewServeMux()
+	for _, rt := range routes {
+		prefix := rt.prefix
+		upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotInternalCall = r.Header.Get("X-Internal-Call")
+			gotInternalSecret = r.Header.Get("X-Internal-Secret")
+			w.WriteHeader(http.StatusOK)
+		})
+		var h http.Handler = http.StripPrefix(prefix, upstream)
+		if requiresAuth(prefix) {
+			h = authMiddleware(auth.URL, "my-secret", h)
+		} else {
+			h = stripInternalHeaders(h)
+		}
+		mux.Handle(prefix+"/", h)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/listings/conversations/c1/confirm", nil)
+	req.Header.Set("Authorization", "Bearer good-token")
+	req.Header.Set("X-Internal-Call", "true")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 with valid auth, got %d", w.Code)
+	}
+	if gotInternalCall != "" {
+		t.Errorf("expected client-supplied X-Internal-Call to be stripped, but upstream saw %q", gotInternalCall)
+	}
+	if gotInternalSecret != "" {
+		t.Errorf("expected X-Internal-Secret to be stripped, but upstream saw %q", gotInternalSecret)
+	}
+}
+
+// TestRouteTable_ClientSuppliedInternalCallDoesNotBypassPublicRateLimit
+// confirms a client cannot set X-Internal-Call: true on a public-prefix
+// route to dodge per-IP rate limiting — the full chain (stripInternalHeaders
+// -> publicRateLimitMiddleware) must still enforce the limit.
+func TestRouteTable_ClientSuppliedInternalCallDoesNotBypassPublicRateLimit(t *testing.T) {
+	freshPublicLimiterPool(t, 30, 1)
+
+	called := 0
+	mw := stripInternalHeaders(publicRateLimitMiddleware("", upstreamCounter(&called)))
+
+	req1 := httptest.NewRequest(http.MethodGet, "/api/public/stats", nil)
+	req1.RemoteAddr = "1.2.3.4:5555"
+	req1.Header.Set("X-Internal-Call", "true")
+	w1 := httptest.NewRecorder()
+	mw.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected first request to succeed, got %d", w1.Code)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/public/stats", nil)
+	req2.RemoteAddr = "1.2.3.4:5555"
+	req2.Header.Set("X-Internal-Call", "true")
+	w2 := httptest.NewRecorder()
+	mw.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected client-supplied X-Internal-Call to NOT bypass rate limiting, got %d", w2.Code)
+	}
+	if called != 1 {
+		t.Errorf("expected upstream called exactly once, got %d", called)
+	}
+}
+
+// TestRouteTable_ClientSuppliedInternalCallDoesNotBypassAuthRateLimit is the
+// authenticated-route equivalent, exercised through the real chain
+// (authMiddleware -> authRateLimitMiddleware -> upstream, as wired in
+// main()): a request with Authorization: Bearer valid-token AND a
+// client-supplied X-Internal-Call: true together must not bypass
+// authentication or rate limiting — the header must be stripped (by
+// authMiddleware) before it reaches authRateLimitMiddleware or any handler.
+func TestRouteTable_ClientSuppliedInternalCallDoesNotBypassAuthRateLimit(t *testing.T) {
+	freshAuthLimiterPool(t, 120, 1)
+
+	auth := newOKAuthServer("user-1", true)
+	defer auth.Close()
+
+	called := 0
+	mw := authMiddleware(auth.URL, "", authRateLimitMiddleware(upstreamCounter(&called)))
+
+	req1 := httptest.NewRequest(http.MethodGet, "/api/listings", nil)
+	req1.Header.Set("Authorization", "Bearer valid-token")
+	req1.Header.Set("X-Internal-Call", "true")
+	w1 := httptest.NewRecorder()
+	mw.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected first request to succeed, got %d", w1.Code)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/listings", nil)
+	req2.Header.Set("Authorization", "Bearer valid-token")
+	req2.Header.Set("X-Internal-Call", "true")
+	w2 := httptest.NewRecorder()
+	mw.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected client-supplied X-Internal-Call to NOT bypass auth rate limiting, got %d", w2.Code)
+	}
+	if called != 1 {
+		t.Errorf("expected upstream called exactly once, got %d", called)
 	}
 }

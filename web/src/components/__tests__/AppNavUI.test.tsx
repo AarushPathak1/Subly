@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 vi.mock("@clerk/nextjs", () => ({
   UserButton: () => <button>Account</button>,
@@ -149,6 +150,63 @@ describe("AppNavUI", () => {
       // renders <AppNav active="settings" />) makes "Settings" appear highlighted/active
       // even though the user is not on the /settings page.
       expect(settingsLink.className).toContain("indigo");
+    });
+  });
+
+  // ── Mobile drawer (H3) ───────────────────────────────────────────────────────
+
+  describe("mobile drawer", () => {
+    it("hamburger button is rendered", () => {
+      render(<AppNavUI />);
+      expect(screen.getByRole("button", { name: "Open menu" })).toBeInTheDocument();
+    });
+
+    it("drawer is closed by default — no duplicate nav links in the DOM", () => {
+      render(<AppNavUI />);
+      expect(screen.getAllByRole("link", { name: "Browse" })).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: "Close menu" })).not.toBeInTheDocument();
+    });
+
+    it("clicking the hamburger opens the drawer and renders nav links again", async () => {
+      const user = userEvent.setup();
+      render(<AppNavUI />);
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+
+      expect(screen.getByRole("button", { name: "Close menu" })).toBeInTheDocument();
+      expect(screen.getAllByRole("link", { name: "Browse" })).toHaveLength(2);
+    });
+
+    it("clicking the close button closes the drawer", async () => {
+      const user = userEvent.setup();
+      render(<AppNavUI />);
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+      await user.click(screen.getByRole("button", { name: "Close menu" }));
+
+      expect(screen.queryByRole("button", { name: "Close menu" })).not.toBeInTheDocument();
+      expect(screen.getAllByRole("link", { name: "Browse" })).toHaveLength(1);
+    });
+
+    it("clicking a nav link inside the drawer closes it", async () => {
+      const user = userEvent.setup();
+      render(<AppNavUI />);
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+
+      const drawerLinks = screen.getAllByRole("link", { name: "Saved" });
+      await user.click(drawerLinks[drawerLinks.length - 1]);
+
+      expect(screen.queryByRole("button", { name: "Close menu" })).not.toBeInTheDocument();
+    });
+
+    it("clicking the overlay closes the drawer", async () => {
+      const user = userEvent.setup();
+      const { container } = render(<AppNavUI />);
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+
+      const overlay = container.querySelector(".bg-black\\/50");
+      expect(overlay).toBeTruthy();
+      await user.click(overlay as Element);
+
+      expect(screen.queryByRole("button", { name: "Close menu" })).not.toBeInTheDocument();
     });
   });
 });

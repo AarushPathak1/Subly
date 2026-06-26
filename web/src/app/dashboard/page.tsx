@@ -16,6 +16,9 @@ interface MatchResult {
   bedrooms: number | null;
   bathrooms: number | null;
   scam_score: number;
+  title: string | null;
+  address: string | null;
+  image_url: string | null;
 }
 
 async function getMatches(userId: string, token: string): Promise<MatchResult[]> {
@@ -52,6 +55,8 @@ function MatchCard({ match, isSaved }: { match: MatchResult; isSaved: boolean })
   const beds = match.bedrooms ?? "–";
   const baths = match.bathrooms ?? "–";
   const university = match.university ?? "Unknown University";
+  const title = match.title ?? "Sublease listing";
+  const subtitle = match.address || university;
   const isHighRisk = match.scam_score > 0.7;
   const riskColor = match.scam_score > 0.7 ? "text-red-500" : match.scam_score > 0.4 ? "text-amber-500" : "text-emerald-500";
   const trustLabel = match.scam_score > 0.7 ? "High Risk" : match.scam_score > 0.4 ? "Review" : "Trusted";
@@ -60,24 +65,57 @@ function MatchCard({ match, isSaved }: { match: MatchResult; isSaved: boolean })
     <div className={`bg-white border rounded-2xl overflow-hidden flex flex-col hover:shadow-lg transition group ${
       isHighRisk ? "border-red-200" : "border-slate-200"
     }`}>
-      {/* Image placeholder with gradient */}
-      <div className={`h-40 relative overflow-hidden ${isHighRisk ? "bg-gradient-to-br from-red-900 to-red-950" : "bg-gradient-to-br from-indigo-900 to-slate-900"}`}>
-        <div className="absolute inset-0 opacity-30 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-400 via-transparent to-transparent" />
-        <div className="absolute top-3 left-3 right-11 flex items-start justify-between">
-          <span className="text-xs font-bold text-white/90 bg-white/15 backdrop-blur-sm px-2.5 py-1 rounded-full">
-            {university}
-          </span>
-          <ScoreBadge score={match.score} />
+      {/* Image or gradient placeholder */}
+      {match.image_url ? (
+        <div className="relative h-40 overflow-hidden bg-slate-100">
+          <img
+            src={match.image_url}
+            alt={title}
+            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+          />
+          <div className="absolute top-3 left-3 right-11 flex items-start justify-between">
+            <span className="text-xs font-bold text-white/90 bg-black/40 backdrop-blur-sm px-2.5 py-1 rounded-full">
+              {university}
+            </span>
+            <ScoreBadge score={match.score} />
+          </div>
+          <SaveButton listingId={match.listing_id} initialSaved={isSaved} variant="card" />
         </div>
-        <SaveButton listingId={match.listing_id} initialSaved={isSaved} variant="card" />
-        <div className="absolute bottom-3 left-3">
-          <p className="text-2xl font-extrabold text-white">{rent}</p>
-          <p className="text-xs text-white/70 mt-0.5">{beds} bed · {baths} bath</p>
+      ) : (
+        <div className={`h-40 relative overflow-hidden ${isHighRisk ? "bg-gradient-to-br from-red-900 to-red-950" : "bg-gradient-to-br from-indigo-900 to-slate-900"}`}>
+          <div className="absolute inset-0 opacity-30 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-400 via-transparent to-transparent" />
+          <div className="absolute top-3 left-3 right-11 flex items-start justify-between">
+            <span className="text-xs font-bold text-white/90 bg-white/15 backdrop-blur-sm px-2.5 py-1 rounded-full">
+              {university}
+            </span>
+            <ScoreBadge score={match.score} />
+          </div>
+          <SaveButton listingId={match.listing_id} initialSaved={isSaved} variant="card" />
         </div>
-      </div>
+      )}
 
       {/* Card body */}
-      <div className="p-4 flex flex-col gap-3 flex-1">
+      <div className="p-4 flex flex-col gap-2 flex-1">
+        <h3 className="text-sm font-bold text-slate-900 leading-snug line-clamp-2 group-hover:text-indigo-700 transition">
+          {title}
+        </h3>
+        {subtitle && (
+          <p className="text-xs text-slate-500 flex items-center gap-1">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path d="M6 1C4.34 1 3 2.34 3 4c0 2.25 3 6 3 6s3-3.75 3-6c0-1.66-1.34-3-3-3z" stroke="currentColor" strokeWidth="1.2"/>
+              <circle cx="6" cy="4" r="1.2" stroke="currentColor" strokeWidth="1.2"/>
+            </svg>
+            {subtitle}
+          </p>
+        )}
+
+        <div className="flex items-center justify-between mt-1">
+          <div>
+            <p className="text-base font-extrabold text-slate-900">{rent}</p>
+            <p className="text-xs text-slate-400">{beds} bed · {baths} bath</p>
+          </div>
+        </div>
+
         {isHighRisk && (
           <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
@@ -135,7 +173,7 @@ function EmptyState() {
 }
 
 export default async function DashboardPage() {
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const [clerkUser, token] = await Promise.all([currentUser(), getToken()]);
 
   const primaryEmail = clerkUser?.emailAddresses.find(

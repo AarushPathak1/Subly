@@ -12,7 +12,7 @@ export interface SessionUser {
 }
 
 export async function getSessionUser(): Promise<SessionUser | null> {
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
   if (!token) return null;
 

@@ -58,7 +58,7 @@ function formatDate(d?: string) {
 
 export default async function ListingDetailPage({ params }: { params: { id: string } }) {
   const user = await requireEduVerified();
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
 
   const res = await fetch(`${GATEWAY}/api/listings/listings/${params.id}`, {

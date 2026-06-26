@@ -2,10 +2,8 @@ import { SublyLogo } from "@/components/SublyLogo";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { notFound } from "next/navigation";
-import { InviteTable } from "./InviteTable";
-
-const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
-const ADMIN_SECRET = process.env.ADMIN_SECRET ?? "";
+import { fetchReports } from "@/lib/adminActions";
+import { ReportsTable } from "./ReportsTable";
 
 export const dynamic = "force-dynamic";
 
@@ -15,18 +13,12 @@ function isAdmin(userId: string | null): boolean {
   return ids.includes(userId);
 }
 
-export default async function AdminInvitesPage() {
+export default async function AdminReportsPage() {
   const { userId } = await auth();
   if (!isAdmin(userId)) notFound();
 
-  const res = await fetch(`${GATEWAY}/api/auth/admin/invite-requests`, {
-    headers: { "X-Admin-Secret": ADMIN_SECRET },
-    cache: "no-store",
-  });
-
-  const invites = res.ok ? await res.json() : [];
-
-  const pendingCount = invites.filter((i: { status: string }) => i.status === "pending").length;
+  const reports = await fetchReports();
+  const openCount = reports.filter((r) => r.status === "open").length;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -44,20 +36,20 @@ export default async function AdminInvitesPage() {
         </Link>
       </nav>
 
-      <div className="max-w-5xl mx-auto px-6 py-8">
+      <div className="max-w-6xl mx-auto px-6 py-8">
         <div className="mb-6 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900 mb-1">Invite Requests</h1>
+            <h1 className="text-2xl font-extrabold text-slate-900 mb-1">Reports</h1>
             <p className="text-sm text-slate-500">
-              {pendingCount > 0
-                ? `${pendingCount} request${pendingCount > 1 ? "s" : ""} waiting for review`
-                : "No pending requests"}
+              {openCount > 0
+                ? `${openCount} report${openCount > 1 ? "s" : ""} awaiting review`
+                : "No open reports"}
             </p>
           </div>
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-          <InviteTable invites={invites} />
+          <ReportsTable reports={reports} />
         </div>
       </div>
     </div>

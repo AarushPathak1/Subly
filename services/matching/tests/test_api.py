@@ -23,6 +23,15 @@ class TestHealthEndpoint:
 
 
 class TestSearchEndpoint:
+    def test_search_returns_401_when_x_user_id_missing(self):
+        """
+        /search returns 401 when the gateway-injected X-User-ID header is
+        missing entirely (defensive — shouldn't happen behind the gateway,
+        but this service must not trust an unauthenticated caller).
+        """
+        resp = client.post("/search", json={"query": "quiet place near campus"})
+        assert resp.status_code == 401
+
     def test_search_returns_list(self):
         """
         /search should call embed_text and Pinecone, returning a list of results.
@@ -42,7 +51,11 @@ class TestSearchEndpoint:
         with patch.object(matching_main, "embed_text", return_value=fake_embedding):
             with patch.object(matching_main, "index") as mock_idx:
                 mock_idx.query.return_value = mock_results
-                resp = client.post("/search", json={"query": "quiet place near campus"})
+                resp = client.post(
+                    "/search",
+                    json={"query": "quiet place near campus"},
+                    headers={"X-User-ID": "user-1"},
+                )
 
         assert resp.status_code == 200
         results = resp.json()
@@ -55,7 +68,11 @@ class TestSearchEndpoint:
         with patch.object(matching_main, "embed_text", return_value=fake_embedding):
             with patch.object(matching_main, "index") as mock_idx:
                 mock_idx.query.return_value = {"matches": []}
-                resp = client.post("/search", json={"query": "studio", "university": "UCLA"})
+                resp = client.post(
+                    "/search",
+                    json={"query": "studio", "university": "UCLA"},
+                    headers={"X-User-ID": "user-1"},
+                )
 
         assert resp.status_code == 200
         # Verify the filter was passed to Pinecone
@@ -66,7 +83,11 @@ class TestSearchEndpoint:
         with patch.object(matching_main, "embed_text", return_value=[0.0] * 1536):
             with patch.object(matching_main, "index") as mock_idx:
                 mock_idx.query.return_value = {"matches": []}
-                resp = client.post("/search", json={"query": "something very unusual"})
+                resp = client.post(
+                    "/search",
+                    json={"query": "something very unusual"},
+                    headers={"X-User-ID": "user-1"},
+                )
 
         assert resp.status_code == 200
         assert resp.json() == []
@@ -122,7 +143,9 @@ class TestMatchesEndpoint:
         profile_cursor.fetchone.return_value = ("quiet place near campus", "UT AUSTIN", 150000, 2)
 
         scam_cursor = MagicMock()
-        scam_cursor.fetchall.return_value = [("listing-xyz", 0.1)]
+        scam_cursor.fetchall.return_value = [
+            ("listing-xyz", 0.1, "Cozy 2BR near UT", "123 Main St", ["https://example.com/photo.jpg"])
+        ]
 
         cm_profile = MagicMock()
         cm_profile.__enter__.return_value = profile_cursor
@@ -159,6 +182,59 @@ class TestMatchesEndpoint:
         assert isinstance(results, list)
         assert results[0]["listing_id"] == "listing-xyz"
         assert results[0]["scam_score"] == 0.1
+        assert results[0]["title"] == "Cozy 2BR near UT"
+        assert results[0]["address"] == "123 Main St"
+        assert results[0]["image_url"] == "https://example.com/photo.jpg"
+
+    def test_matches_includes_null_title_address_image_when_listing_not_found(self):
+        """
+        If a Pinecone match's listing_id has no corresponding row in the
+        listings table (e.g. deleted), title/address/image_url should be
+        null rather than raising a KeyError.
+        """
+        fake_embedding = [0.5] * 1536
+
+        profile_cursor = MagicMock()
+        profile_cursor.fetchone.return_value = ("quiet place near campus", "UT AUSTIN", 150000, 2)
+
+        scam_cursor = MagicMock()
+        scam_cursor.fetchall.return_value = []  # no matching listing row
+
+        cm_profile = MagicMock()
+        cm_profile.__enter__.return_value = profile_cursor
+        cm_profile.__exit__.return_value = False
+
+        cm_scam = MagicMock()
+        cm_scam.__enter__.return_value = scam_cursor
+        cm_scam.__exit__.return_value = False
+
+        mock_conn = MagicMock()
+        mock_conn.cursor.side_effect = [cm_profile, cm_scam]
+
+        pinecone_results = {
+            "matches": [
+                {
+                    "id": "listing-deleted",
+                    "score": 0.5,
+                    "metadata": {"university": "UT AUSTIN", "rent_cents": 130000, "bedrooms": 2},
+                }
+            ]
+        }
+
+        with patch.object(matching_main, "get_db", return_value=mock_conn):
+            with patch.object(matching_main, "embed_text", return_value=fake_embedding):
+                with patch.object(matching_main, "index") as mock_idx:
+                    mock_idx.query.return_value = pinecone_results
+                    resp = client.get(
+                        "/matches/user-with-profile",
+                        headers={"X-User-ID": "user-with-profile"},
+                    )
+
+        assert resp.status_code == 200
+        results = resp.json()
+        assert results[0]["title"] is None
+        assert results[0]["address"] is None
+        assert results[0]["image_url"] is None
 
 
 class TestEmbedEndpoint:

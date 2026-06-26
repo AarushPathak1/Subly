@@ -30,7 +30,7 @@ function relativeTime(iso?: string): string {
 
 export default async function MessagesPage() {
   const user = await requireEduVerified();
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
 
   const res = await fetch(`${GATEWAY}/api/messages/conversations`, {

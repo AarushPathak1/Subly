@@ -189,6 +189,8 @@ describe("sendMessage", () => {
 // ── createCheckoutSession ─────────────────────────────────────────────────────
 
 describe("createCheckoutSession", () => {
+  const mockListerSessionUser = { id: "user-2", clerk_id: "clerk-2", email: "lister@ut.edu", edu_verified: true, university: null };
+
   beforeEach(() => {
     mockFetch.mockClear();
     mockStripeCreate.mockClear();
@@ -196,6 +198,7 @@ describe("createCheckoutSession", () => {
 
   it("returns Stripe checkout URL", async () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockConversation });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockListerSessionUser });
     mockStripeCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/test" });
 
     const result = await createCheckoutSession("conv-1");
@@ -210,9 +213,20 @@ describe("createCheckoutSession", () => {
     );
   });
 
+  it("returns an error when the caller is not the lister", async () => {
+    const mockRenterSessionUser = { id: "user-1", clerk_id: "clerk-1", email: "renter@ut.edu", edu_verified: true, university: null };
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockConversation });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockRenterSessionUser });
+
+    const result = await createCheckoutSession("conv-1");
+    expect(result).toEqual({ error: "Only the lister can confirm a match." });
+    expect(mockStripeCreate).not.toHaveBeenCalled();
+  });
+
   it("uses correct fee tier based on initial_rent_cents", async () => {
     const cheapConv = { ...mockConversation, initial_rent_cents: 80000 };
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => cheapConv });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockListerSessionUser });
     mockStripeCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/test" });
 
     await createCheckoutSession("conv-1");
@@ -228,6 +242,7 @@ describe("createCheckoutSession", () => {
 
   it("includes conversation_id in Stripe metadata", async () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockConversation });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockListerSessionUser });
     mockStripeCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/test" });
 
     await createCheckoutSession("conv-1");
@@ -237,6 +252,7 @@ describe("createCheckoutSession", () => {
 
   it("includes success_url and cancel_url", async () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockConversation });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockListerSessionUser });
     mockStripeCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/test" });
 
     await createCheckoutSession("conv-1");

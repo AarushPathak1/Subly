@@ -195,3 +195,150 @@ func TestCreateReport_DetailsTooLong_400(t *testing.T) {
 		t.Errorf("expected error=details_too_long, got %q", resp["error"])
 	}
 }
+
+// ── ListReports (admin) ────────────────────────────────────────────────────────
+
+func TestListReports_RequiresInternalCall_403(t *testing.T) {
+	s := &server{}
+	req := httptest.NewRequest(http.MethodGet, "/reports", nil)
+	w := httptest.NewRecorder()
+	s.handleListReports(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without X-Internal-Call, got %d", w.Code)
+	}
+}
+
+func TestIntegration_ListReports_Success(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	s := &server{db: db}
+
+	body := `{"target_kind":"listing","target_id":"` + listingID + `","reason":"scam","details":"Suspicious"}`
+	createReq := httptest.NewRequest(http.MethodPost, "/reports", bytes.NewBufferString(body))
+	createReq.Header.Set("X-User-ID", testUserID)
+	cw := httptest.NewRecorder()
+	s.handleCreateReport(cw, createReq)
+	var created map[string]string
+	json.NewDecoder(cw.Body).Decode(&created)
+	cleanupReport(t, db, created["id"])
+
+	req := httptest.NewRequest(http.MethodGet, "/reports", nil)
+	req.Header.Set("X-Internal-Call", "true")
+	w := httptest.NewRecorder()
+	s.handleListReports(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var reports []Report
+	if err := json.NewDecoder(w.Body).Decode(&reports); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	found := false
+	for _, rep := range reports {
+		if rep.ID == created["id"] {
+			found = true
+			if rep.ReporterID != testUserID {
+				t.Errorf("expected reporter_id=%s, got %s", testUserID, rep.ReporterID)
+			}
+			if rep.Status != "open" {
+				t.Errorf("expected status=open, got %q", rep.Status)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected created report %s to appear in list", created["id"])
+	}
+}
+
+// ── UpdateReportStatus (admin) ─────────────────────────────────────────────────
+
+func TestUpdateReportStatus_RequiresInternalCall_403(t *testing.T) {
+	s := &server{}
+	req := httptest.NewRequest(http.MethodPatch, "/reports/some-id", bytes.NewBufferString(`{"status":"reviewed"}`))
+	req.SetPathValue("id", "some-id")
+	w := httptest.NewRecorder()
+	s.handleUpdateReportStatus(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without X-Internal-Call, got %d", w.Code)
+	}
+}
+
+func TestIntegration_UpdateReportStatus_InvalidStatus_400(t *testing.T) {
+	db := requireDB(t)
+	s := &server{db: db}
+
+	req := httptest.NewRequest(http.MethodPatch, "/reports/00000000-0000-0000-0000-000000000099", bytes.NewBufferString(`{"status":"banned"}`))
+	req.SetPathValue("id", "00000000-0000-0000-0000-000000000099")
+	req.Header.Set("X-Internal-Call", "true")
+	w := httptest.NewRecorder()
+	s.handleUpdateReportStatus(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "invalid_status" {
+		t.Errorf("expected error=invalid_status, got %q", resp["error"])
+	}
+}
+
+func TestIntegration_UpdateReportStatus_Success(t *testing.T) {
+	db := requireDB(t)
+	seedTestUser(t, db)
+	seedSecondUser(t, db, testListerID, "lister2@university.edu")
+	listingID := seedTestListing(t, db, testListerID, 120000)
+	s := &server{db: db}
+
+	body := `{"target_kind":"listing","target_id":"` + listingID + `","reason":"spam","details":""}`
+	createReq := httptest.NewRequest(http.MethodPost, "/reports", bytes.NewBufferString(body))
+	createReq.Header.Set("X-User-ID", testUserID)
+	cw := httptest.NewRecorder()
+	s.handleCreateReport(cw, createReq)
+	var created map[string]string
+	json.NewDecoder(cw.Body).Decode(&created)
+	cleanupReport(t, db, created["id"])
+
+	req := httptest.NewRequest(http.MethodPatch, "/reports/"+created["id"], bytes.NewBufferString(`{"status":"dismissed"}`))
+	req.SetPathValue("id", created["id"])
+	req.Header.Set("X-Internal-Call", "true")
+	w := httptest.NewRecorder()
+	s.handleUpdateReportStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var rep Report
+	if err := json.NewDecoder(w.Body).Decode(&rep); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if rep.Status != "dismissed" {
+		t.Errorf("expected status=dismissed, got %q", rep.Status)
+	}
+
+	var dbStatus string
+	db.QueryRow(context.Background(), `SELECT status FROM reports WHERE id = $1`, created["id"]).Scan(&dbStatus)
+	if dbStatus != "dismissed" {
+		t.Errorf("expected DB status=dismissed, got %q", dbStatus)
+	}
+}
+
+func TestIntegration_UpdateReportStatus_NotFound_404(t *testing.T) {
+	db := requireDB(t)
+	s := &server{db: db}
+
+	req := httptest.NewRequest(http.MethodPatch, "/reports/00000000-0000-0000-0000-000000000099", bytes.NewBufferString(`{"status":"reviewed"}`))
+	req.SetPathValue("id", "00000000-0000-0000-0000-000000000099")
+	req.Header.Set("X-Internal-Call", "true")
+	w := httptest.NewRecorder()
+	s.handleUpdateReportStatus(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
