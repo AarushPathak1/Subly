@@ -736,3 +736,31 @@ export async function fetchSavedListingIds(): Promise<Set<string>> {
   const saved = await fetchSavedListings();
   return new Set(saved.map((s) => s.id));
 }
+
+// ─── Reports ──────────────────────────────────────────────────────────────────
+
+export type ReportReason = "scam" | "spam" | "harassment" | "inappropriate" | "other";
+export type ReportTargetKind = "listing" | "user" | "message";
+
+export async function submitReport(input: {
+  target_kind: ReportTargetKind;
+  target_id: string;
+  reason: ReportReason;
+  details?: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const token = await getBearerToken();
+  if (!token) return { ok: false, error: "Not signed in" };
+  try {
+    const res = await fetch(`${GATEWAY}/api/listings/reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(input),
+    });
+
+    if (res.status === 201) return { ok: true };
+    if (res.status === 409) return { ok: false, error: "You've already reported this." };
+    return { ok: false, error: "Couldn't submit report. Please try again." };
+  } catch {
+    return { ok: false, error: "Couldn't submit report. Please try again." };
+  }
+}

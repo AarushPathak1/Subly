@@ -49,6 +49,7 @@ import {
   fetchSavedListingIds,
   proposeViewing,
   respondToViewing,
+  submitReport,
 } from "@/lib/actions";
 
 // ── calculateMatchFee ─────────────────────────────────────────────────────────
@@ -935,5 +936,53 @@ describe("respondToViewing", () => {
     expect(await respondToViewing("conv-1", "msg-1", "accept")).toEqual({
       error: "Failed to respond to the viewing proposal",
     });
+  });
+});
+
+// ── submitReport ──────────────────────────────────────────────────────────────
+
+describe("submitReport", () => {
+  beforeEach(() => mockFetch.mockClear());
+
+  it("returns ok:true on 201", async () => {
+    mockFetch.mockResolvedValueOnce({ status: 201 });
+    const result = await submitReport({
+      target_kind: "listing",
+      target_id: "listing-1",
+      reason: "scam",
+      details: "looks fake",
+    });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("posts to /api/listings/reports with the bearer token and JSON body", async () => {
+    mockFetch.mockResolvedValueOnce({ status: 201 });
+    await submitReport({ target_kind: "user", target_id: "user-1", reason: "harassment" });
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/listings/reports"),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer mock-token" }),
+        body: JSON.stringify({ target_kind: "user", target_id: "user-1", reason: "harassment" }),
+      })
+    );
+  });
+
+  it("maps 409 to an already-reported error", async () => {
+    mockFetch.mockResolvedValueOnce({ status: 409 });
+    const result = await submitReport({ target_kind: "listing", target_id: "listing-1", reason: "spam" });
+    expect(result).toEqual({ ok: false, error: "You've already reported this." });
+  });
+
+  it("maps other failure statuses to a generic error", async () => {
+    mockFetch.mockResolvedValueOnce({ status: 500 });
+    const result = await submitReport({ target_kind: "listing", target_id: "listing-1", reason: "other" });
+    expect(result).toEqual({ ok: false, error: "Couldn't submit report. Please try again." });
+  });
+
+  it("returns a generic error when fetch rejects (network error)", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+    const result = await submitReport({ target_kind: "listing", target_id: "listing-1", reason: "other" });
+    expect(result).toEqual({ ok: false, error: "Couldn't submit report. Please try again." });
   });
 });

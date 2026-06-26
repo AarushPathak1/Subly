@@ -18,18 +18,20 @@ export function ReviewsSection({
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest">{title}</h2>
-        <div className="flex items-center gap-2">
-          <StarRating value={summary.average ?? 0} />
-          <span className="text-sm font-semibold text-slate-900">
-            {summary.average?.toFixed(1) ?? "—"}
-          </span>
-          <span className="text-xs text-slate-400">
-            {summary.count} review{summary.count === 1 ? "" : "s"}
-          </span>
-        </div>
+        {summary.count > 0 && (
+          <div className="flex items-center gap-2">
+            <StarRating value={summary.average ?? 0} />
+            <span className="text-sm font-semibold text-slate-900">
+              {summary.average?.toFixed(1) ?? "—"}
+            </span>
+            <span className="text-xs text-slate-400">
+              {summary.count} review{summary.count === 1 ? "" : "s"}
+            </span>
+          </div>
+        )}
       </div>
 
-      {summary.count === 0 ? (
+      {reviews.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 border-dashed py-10 text-center">
           <p className="text-slate-400 text-sm">No reviews yet.</p>
         </div>

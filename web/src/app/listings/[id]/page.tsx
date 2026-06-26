@@ -4,6 +4,7 @@ import { AppNav } from "@/components/AppNav";
 import { startConversation, fetchSavedListingIds, fetchReviewsForLister, fetchReviewSummary } from "@/lib/actions";
 import { SaveButton } from "@/components/SaveButton";
 import { ReviewsSection } from "@/components/ReviewsSection";
+import { ReportButton } from "@/components/ReportButton";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -250,6 +251,12 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
                 Browse all listings
               </Link>
             </div>
+
+            {!isOwner && (
+              <div className="pt-4">
+                <ReportButton targetKind="listing" targetId={listing.id} label="Report listing" />
+              </div>
+            )}
 
             {/* Reviews of this lister */}
             <div className="border-t border-slate-100 pt-6 mt-6">

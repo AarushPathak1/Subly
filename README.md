@@ -28,7 +28,7 @@ graph TD
     end
 
     subgraph Storage
-        PG[("PostgreSQL 16\nusers · listings\nuser_profiles · conversations\nmessages · invite_requests")]
+        PG[("PostgreSQL 16\nusers · listings\nuser_profiles · conversations\nmessages · invite_requests · reports")]
         PINECONE[("Pinecone\nvector index\n1536-dim cosine")]
         S3[("AWS S3\nlisting images")]
     end
@@ -36,6 +36,8 @@ graph TD
     STRIPE["Stripe\nHosted Checkout"]
     RESEND["Resend\nTransactional Email"]
     OPENAI["OpenAI\ngpt-4o-mini + text-embedding-3-small"]
+    POSTHOG["PostHog\nProduct Analytics"]
+    SENTRY["Sentry\nError Tracking"]
 
     Browser -->|"Bearer token"| AUTH_MW
     AUTH_MW -->|"validates via /validate"| AUTH
@@ -66,6 +68,10 @@ graph TD
     Browser -->|"PUT image (pre-signed)"| S3
     Browser -->|"Checkout redirect"| STRIPE
     STRIPE -->|"session webhook"| Browser
+
+    Browser -->|"named events"| POSTHOG
+    PROXY -->|"errors"| SENTRY
+    Browser -->|"errors"| SENTRY
 ```
 
 ### Request flow — posting a listing
@@ -151,6 +157,7 @@ psql $DATABASE_URL -f infra/postgres/migrate_reviews.sql        # 4 — reviews 
 psql $DATABASE_URL -f infra/postgres/migrate_saved_listings.sql # 5 — saved listings (bookmarks)
 psql $DATABASE_URL -f infra/postgres/migrate_viewings.sql       # 6 — viewing scheduler columns
 psql $DATABASE_URL -f infra/postgres/migrate_view_count.sql     # 7 — listing view_count column
+psql $DATABASE_URL -f infra/postgres/migrate_reports.sql        # 8 — reports table
 ```
 
 All statements are idempotent (`IF NOT EXISTS`) except the enum addition in migration 3, which uses `ADD VALUE IF NOT EXISTS` and must **not** be run inside a transaction block.
@@ -170,7 +177,7 @@ All statements are idempotent (`IF NOT EXISTS`) except the enum addition in migr
 | `/listings/new` | Clerk + edu | Create a new sublease listing |
 | `/listings/my` | Clerk + edu | Manage your listings (pause / reactivate / mark leased), including per-listing view counts |
 | `/listings/saved` | Clerk + edu | Your bookmarked (saved) listings |
-| `/listings/[id]` | Clerk + edu | Listing detail — images, trust badge, "Message lister" CTA, Save/bookmark button, increments the view count for non-owners |
+| `/listings/[id]` | Clerk + edu | Listing detail — images, trust badge, "Message lister" CTA, Save/bookmark button, "Report listing" button (`POST /api/listings/reports`), increments the view count for non-owners |
 | `/listings/[id]/edit` | Clerk + owner | Edit listing (ownership enforced server-side) |
 | `/messages` | Clerk + edu | Inbox — all conversations with unread indicators |
 | `/messages/[id]` | Clerk + edu | Thread — chat, viewing-proposal scheduler, confirm panel (lister), renter info banner |
@@ -262,15 +269,14 @@ Credentials stay server-side. Each key is namespaced `listings/{uuid}/{sanitized
 
 | Layer | Framework | Tests | Coverage |
 |---|---|---|---|
-| Web — schemas | Vitest | 29 | Zod validation for all form schemas |
-| Web — server actions | Vitest + fetch mocks | 27 | Fee calculation, fetch resilience, Stripe checkout session creation and payment verification |
-| Web — ThreadClient | Vitest + Testing Library | 32 | Message rendering, send input, polling, confirm panel (fee tiers, Stripe redirect), renter/lister/confirmed banners |
-| Web — AppNavUI | Vitest + Testing Library | 15 | Unread badge boundaries, nav links, back arrow, active highlighting |
-| Web — components | Vitest + Testing Library | 16 | GetStartedFlow, UniversityCombobox |
-| Listings service | Go testing + httptest | 27 | Conversation lifecycle (create, list, get, send, confirm), access control, idempotency, field capture |
-| Gateway | Go testing + httptest | 7 | Auth middleware — missing header, auth errors, unverified users, verified user injection |
+| Web (all suites) | Vitest + Testing Library | 342+ | Schemas, server actions, ThreadClient, AppNavUI, ReviewsSection, ReportButton, SaveButton, and other components |
+| Auth service | Jest + supertest | 96+ | Invite flow, account deletion, notifications, error handler, log redaction (`logSafeIdentifier`), viewing-responded email |
+| Listings service | Go testing + httptest | 162+ | Conversation lifecycle, reviews, saved listings, reports, access control, idempotency, field capture |
+| Gateway | Go testing + httptest | 55+ | Auth middleware — missing header, auth errors, unverified users, verified user injection |
 | Matching service | pytest + FastAPI TestClient | — | Health, search, and matches endpoints with mocked Pinecone/OpenAI |
 | Trust service | pytest | — | Keyword scoring, formula, score capping |
+
+<sup>Counts refreshed 2026-06-25.</sup>
 
 Run web tests: `cd web && npm test`
 
@@ -320,6 +326,7 @@ psql $DATABASE_URL -f infra/postgres/migrate_reviews.sql        # 4 — reviews 
 psql $DATABASE_URL -f infra/postgres/migrate_saved_listings.sql # 5 — saved listings (bookmarks)
 psql $DATABASE_URL -f infra/postgres/migrate_viewings.sql       # 6 — viewing scheduler columns
 psql $DATABASE_URL -f infra/postgres/migrate_view_count.sql     # 7 — listing view_count column
+psql $DATABASE_URL -f infra/postgres/migrate_reports.sql        # 8 — reports table
 ```
 
 `init.sql` is applied automatically on first boot. The numbered migrations are for existing databases only.
@@ -410,7 +417,8 @@ subly/
 │   │   ├── migrate_reviews.sql        # Migration 4: add reviews table
 │   │   ├── migrate_saved_listings.sql # Migration 5: add saved listings (bookmarks)
 │   │   ├── migrate_viewings.sql       # Migration 6: add viewing scheduler columns
-│   │   └── migrate_view_count.sql     # Migration 7: add listing view_count column
+│   │   ├── migrate_view_count.sql     # Migration 7: add listing view_count column
+│   │   └── migrate_reports.sql        # Migration 8: add reports table
 │   └── rabbitmq/
 ├── docker-compose.yml
 └── .env.example

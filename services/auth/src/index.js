@@ -13,6 +13,11 @@ const resend = process.env.RESEND_API_KEY
 const APP_URL = process.env.APP_URL || "http://localhost:3000";
 const FROM = process.env.FROM_EMAIL || "Subly <onboarding@resend.dev>";
 
+function logSafeIdentifier(value) {
+  if (!value) return "<empty>";
+  return crypto.createHash("sha256").update(String(value)).digest("hex").slice(0, 8);
+}
+
 async function getUserEmail(userId) {
   const { rows } = await db.query("SELECT email FROM users WHERE id = $1", [userId]);
   return rows[0]?.email ?? null;
@@ -45,7 +50,7 @@ async function sendNewMessageEmail({ recipientId, listingTitle, conversationId }
       </div>
     `,
   });
-  console.log(`[auth] new message email sent to ${to}`);
+  console.log(`[auth] new message email sent to ${logSafeIdentifier(to)}`);
 }
 
 async function sendMatchConfirmedEmail({ listerId, renterId, listingTitle, conversationId }) {
@@ -82,7 +87,7 @@ async function sendMatchConfirmedEmail({ listerId, renterId, listingTitle, conve
         </div>
       `,
     });
-    console.log(`[auth] match confirmed email sent to lister ${listerEmail}`);
+    console.log(`[auth] match confirmed email sent to lister ${logSafeIdentifier(listerEmail)}`);
   }
 
   if (renterEmail) {
@@ -112,7 +117,7 @@ async function sendMatchConfirmedEmail({ listerId, renterId, listingTitle, conve
         </div>
       `,
     });
-    console.log(`[auth] match confirmed email sent to renter ${renterEmail}`);
+    console.log(`[auth] match confirmed email sent to renter ${logSafeIdentifier(renterEmail)}`);
   }
 }
 
@@ -144,13 +149,50 @@ async function sendListingExpiredEmail({ listerId, listingId, listingTitle }) {
       </div>
     `,
   });
-  console.log(`[auth] listing expired email sent to ${to}`);
+  console.log(`[auth] listing expired email sent to ${logSafeIdentifier(to)}`);
+}
+
+async function sendViewingRespondedEmail({ recipientId, listingTitle, conversationId, status }) {
+  if (!resend) return;
+  const to = await getUserEmail(recipientId);
+  if (!to) return;
+  const isAccepted = status === "accepted";
+  await resend.emails.send({
+    from: FROM,
+    to,
+    subject: `Your viewing proposal was ${status} — "${listingTitle}"`,
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#fff">
+        <div style="margin-bottom:28px">
+          <span style="font-size:22px;font-weight:800;color:#1e1b4b;letter-spacing:-0.5px">Subly</span>
+        </div>
+        ${isAccepted ? `
+        <div style="width:48px;height:48px;border-radius:50%;background:#d1fae5;display:flex;align-items:center;justify-content:center;margin-bottom:20px">
+          <span style="font-size:24px">✓</span>
+        </div>
+        ` : ""}
+        <h1 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 8px">Your viewing proposal was ${status}</h1>
+        <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 24px">
+          Your viewing request for <strong>${listingTitle}</strong> was ${status}. Open the conversation to coordinate next steps.
+        </p>
+        <a href="${APP_URL}/messages/${conversationId}"
+          style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;font-weight:700;font-size:15px;border-radius:12px;text-decoration:none">
+          View conversation →
+        </a>
+        <p style="color:#94a3b8;font-size:12px;margin-top:32px;line-height:1.5">
+          You're receiving this because you have an active conversation on Subly.
+        </p>
+      </div>
+    `,
+  });
+  console.log(`[auth] viewing responded email sent to ${logSafeIdentifier(to)}`);
 }
 
 async function consumeNotifications(ch) {
   await ch.assertQueue("notifications.new_message", { durable: true });
   await ch.assertQueue("notifications.match_confirmed", { durable: true });
   await ch.assertQueue("notifications.listing_expired", { durable: true });
+  await ch.assertQueue("notifications.viewing_responded", { durable: true });
 
   ch.consume("notifications.new_message", async (msg) => {
     if (!msg) return;
@@ -188,12 +230,28 @@ async function consumeNotifications(ch) {
     }
   });
 
+  ch.consume("notifications.viewing_responded", async (msg) => {
+    if (!msg) return;
+    try {
+      const { recipient_id, listing_title, conversation_id, status } = JSON.parse(msg.content.toString());
+      await sendViewingRespondedEmail({ recipientId: recipient_id, listingTitle: listing_title, conversationId: conversation_id, status });
+    } catch (err) {
+      console.error("[auth] viewing_responded notification error:", err);
+    } finally {
+      ch.ack(msg);
+    }
+  });
+
   console.log("[auth] notification consumers registered");
 }
 
 async function sendInviteEmail({ to, universityName, magicLink }) {
   if (!resend) {
-    console.log(`[auth] RESEND_API_KEY not set — magic link for ${to}: ${magicLink}`);
+    if (process.env.NODE_ENV === "production") {
+      console.error("[auth] RESEND_API_KEY missing — magic link NOT sent for recipient=" + logSafeIdentifier(to));
+    } else {
+      console.log(`[auth] RESEND_API_KEY not set — magic link for ${to}: ${magicLink}`);
+    }
     return;
   }
   const from = process.env.FROM_EMAIL || "Subly <invites@subly.app>";
@@ -222,7 +280,7 @@ async function sendInviteEmail({ to, universityName, magicLink }) {
       </div>
     `,
   });
-  console.log(`[auth] invite email sent to ${to}`);
+  console.log(`[auth] invite email sent to ${logSafeIdentifier(to)}`);
 }
 
 const app = express();
@@ -720,12 +778,20 @@ if (require.main === module) {
   app.listen(PORT, () => console.log(`[auth] listening on :${PORT}`));
 }
 
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  console.error("[auth] unhandled error:", err);
+  res.status(500).json({ error: "Internal server error" });
+});
+
 module.exports = {
   app, db, connectMQ, getChannel: () => channel,
   sendNewMessageEmail,
   sendMatchConfirmedEmail,
   sendListingExpiredEmail,
+  sendViewingRespondedEmail,
   consumeNotifications,
   purgeDeletedUsers,
   startPurgeWorker,
+  logSafeIdentifier,
 };

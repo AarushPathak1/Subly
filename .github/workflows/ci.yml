@@ -70,6 +70,24 @@ jobs:
       - name: Run schema tests
         run: npm test
 
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      # NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY must decode (via atob) to a
+      # "<frontend-api-host>$" string or Clerk's middleware throws during
+      # `next build`'s page-data collection — a plain placeholder string is
+      # not valid base64 payload, so this key is base64("dummy-for-ci.clerk.accounts.dev$").
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_GATEWAY_URL: http://localhost:8080
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZHVtbXktZm9yLWNpLmNsZXJrLmFjY291bnRzLmRldiQ=
+          CLERK_SECRET_KEY: sk_test_dummy_for_ci_build
+          NEXT_PUBLIC_POSTHOG_KEY: ""
+          NEXT_PUBLIC_POSTHOG_HOST: ""
+          POSTHOG_API_KEY: ""
+          SENTRY_DSN: ""
+
   # ────────────────────────────────────────────────────────────────────────────
   # JOB 2: Gateway (Go auth middleware tests)
   # ────────────────────────────────────────────────────────────────────────────
@@ -87,6 +105,12 @@ jobs:
           go-version: "1.22"
           cache: true
           cache-dependency-path: gateway/go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
 
       - name: Run gateway tests
         run: go test ./... -v -count=1
@@ -128,6 +152,12 @@ jobs:
           PGPASSWORD=subly_secret psql \
             -h localhost -U subly -d subly \
             -f ../../infra/postgres/init.sql
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
 
       # RABBITMQ_URL is unset — tests that publish events skip gracefully
       # because main() (which calls requireEnv) is never invoked by go test.
@@ -213,7 +243,58 @@ jobs:
         run: npm test
 
   # ────────────────────────────────────────────────────────────────────────────
-  # JOB 7: Deploy to Railway
+  # JOB 7: Schema drift check
+  #
+  # init.sql is meant to already contain every change the migrate_*.sql files
+  # make (all of them use IF NOT EXISTS / idempotent DDL), so applying the
+  # migrations on top of a fresh init.sql should be a no-op. This job builds
+  # two databases — one from init.sql alone, one from init.sql + every
+  # migrate_*.sql — and fails the build if `pg_dump --schema-only` differs
+  # between them, which means init.sql has drifted out of sync with reality.
+  # ────────────────────────────────────────────────────────────────────────────
+  test-schema-drift:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start PostgreSQL and create databases
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -c "CREATE USER subly WITH PASSWORD 'subly_secret';"
+          sudo -u postgres psql -c "CREATE DATABASE subly_init OWNER subly;"
+          sudo -u postgres psql -c "CREATE DATABASE subly_migrated OWNER subly;"
+
+      - name: Apply init.sql only (baseline)
+        run: |
+          PGPASSWORD=subly_secret psql \
+            -h localhost -U subly -d subly_init \
+            -f infra/postgres/init.sql
+
+      - name: Apply init.sql + all migrations (candidate)
+        run: |
+          PGPASSWORD=subly_secret psql \
+            -h localhost -U subly -d subly_migrated \
+            -f infra/postgres/init.sql
+          for f in infra/postgres/migrate_*.sql; do
+            echo "Applying $f"
+            PGPASSWORD=subly_secret psql \
+              -h localhost -U subly -d subly_migrated \
+              -f "$f"
+          done
+
+      - name: Dump both schemas and diff
+        run: |
+          PGPASSWORD=subly_secret pg_dump \
+            -h localhost -U subly -d subly_init \
+            --schema-only --no-owner --no-comments > /tmp/schema_init.sql
+          PGPASSWORD=subly_secret pg_dump \
+            -h localhost -U subly -d subly_migrated \
+            --schema-only --no-owner --no-comments > /tmp/schema_migrated.sql
+          diff -u /tmp/schema_init.sql /tmp/schema_migrated.sql
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 8: Deploy to Railway
   #
   # Only runs on pushes to main (not on PRs) and only after every test job
   # passes. `needs:` lists all test jobs — if any fail this job is skipped.
@@ -227,7 +308,7 @@ jobs:
   #   GitHub repo → Settings → Secrets → Actions → New secret → RAILWAY_TOKEN
   # ────────────────────────────────────────────────────────────────────────────
   deploy:
-    needs: [test-web, test-gateway, test-listings, test-matching, test-trust, test-auth]
+    needs: [test-web, test-gateway, test-listings, test-matching, test-trust, test-auth, test-schema-drift]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 

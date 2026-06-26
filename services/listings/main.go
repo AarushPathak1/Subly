@@ -134,6 +134,13 @@ type SavedListing struct {
 	SavedAt time.Time `json:"saved_at"`
 }
 
+type CreateReportRequest struct {
+	TargetKind string `json:"target_kind"`
+	TargetID   string `json:"target_id"`
+	Reason     string `json:"reason"`
+	Details    string `json:"details"`
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 type server struct {
@@ -172,6 +179,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /saved", s.handleListSaved)
 	mux.HandleFunc("POST /saved", s.handleSaveListing)
 	mux.HandleFunc("DELETE /saved/{listing_id}", s.handleUnsaveListing)
+	mux.HandleFunc("POST /reports", s.handleCreateReport)
 	return mux
 }
 
@@ -866,8 +874,12 @@ func (s *server) handleRespondViewing(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	var renterID, listerID string
-	err := s.db.QueryRow(ctx, `SELECT renter_id, lister_id FROM conversations WHERE id = $1`, id).Scan(&renterID, &listerID)
+	var renterID, listerID, listingTitle string
+	err := s.db.QueryRow(ctx, `
+		SELECT c.renter_id, c.lister_id, l.title
+		FROM conversations c
+		JOIN listings l ON l.id = c.listing_id
+		WHERE c.id = $1`, id).Scan(&renterID, &listerID, &listingTitle)
 	if err != nil {
 		writeErr(w, r, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
@@ -925,6 +937,7 @@ func (s *server) handleRespondViewing(w http.ResponseWriter, r *http.Request) {
 		"conversation_id": id,
 		"message_id":      msg.ID,
 		"status":          status,
+		"listing_title":   listingTitle,
 	})
 
 	writeJSON(w, http.StatusOK, msg)
@@ -1076,6 +1089,59 @@ func (s *server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "already_reviewed"})
+			return
+		}
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+func (s *server) handleCreateReport(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
+	var body CreateReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, r, http.StatusBadRequest, fmt.Errorf("invalid body"))
+		return
+	}
+	switch body.TargetKind {
+	case "listing", "user", "message":
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_target_kind"})
+		return
+	}
+	if !uuidRe.MatchString(body.TargetID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_target_id"})
+		return
+	}
+	switch body.Reason {
+	case "scam", "spam", "harassment", "inappropriate", "other":
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_reason"})
+		return
+	}
+	trimmedDetails := strings.TrimSpace(body.Details)
+	if len([]rune(trimmedDetails)) > 1000 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "details_too_long"})
+		return
+	}
+	ctx := r.Context()
+
+	var id string
+	err := s.db.QueryRow(ctx, `
+		INSERT INTO reports (reporter_id, target_kind, target_id, reason, details)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id`,
+		userID, body.TargetKind, body.TargetID, body.Reason, trimmedDetails,
+	).Scan(&id)
+	if err != nil {
+		if isUniqueViolation(err) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "already_reported"})
 			return
 		}
 		writeErr(w, r, http.StatusInternalServerError, err)
@@ -1443,8 +1509,7 @@ func displayNameFromEmail(email string) string {
 }
 
 func isUniqueViolation(err error) bool {
-	return strings.Contains(err.Error(), "reviews_reviewer_conversation_unique") ||
-		strings.Contains(err.Error(), "duplicate key value violates unique constraint")
+	return strings.Contains(err.Error(), "duplicate key value violates unique constraint")
 }
 
 // ─── Expiration worker ───────────────────────────────────────────────────────
