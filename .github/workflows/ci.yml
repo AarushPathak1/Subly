@@ -291,7 +291,11 @@ jobs:
           PGPASSWORD=subly_secret pg_dump \
             -h localhost -U subly -d subly_migrated \
             --schema-only --no-owner --no-comments > /tmp/schema_migrated.sql
-          diff -u /tmp/schema_init.sql /tmp/schema_migrated.sql
+          # Strip pg_dump's per-invocation random security nonces before diffing;
+          # \restrict / \unrestrict lines always differ between separate dump runs.
+          grep -v '^\(\\restrict\|\\unrestrict\)' /tmp/schema_init.sql    > /tmp/schema_init_clean.sql
+          grep -v '^\(\\restrict\|\\unrestrict\)' /tmp/schema_migrated.sql > /tmp/schema_migrated_clean.sql
+          diff -u /tmp/schema_init_clean.sql /tmp/schema_migrated_clean.sql
 
   # ────────────────────────────────────────────────────────────────────────────
   # JOB 8: Deploy to Railway
