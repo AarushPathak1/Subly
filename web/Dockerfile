@@ -8,9 +8,12 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # NEXT_PUBLIC_* vars are baked into the client bundle at build time by Next.js.
-# Clerk v6 requires the publishable key to be present during `npm run build`.
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG NEXT_PUBLIC_POSTHOG_KEY
+ENV NEXT_PUBLIC_POSTHOG_KEY=$NEXT_PUBLIC_POSTHOG_KEY
+ARG NEXT_PUBLIC_POSTHOG_HOST
+ENV NEXT_PUBLIC_POSTHOG_HOST=$NEXT_PUBLIC_POSTHOG_HOST
 RUN npm run build
 
 FROM node:20-alpine AS runner
