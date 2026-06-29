@@ -350,8 +350,8 @@ export default function ListingForm({ onImagesChange, initialValues, mode = "cre
           <div>
             <label className={labelCls}>Lease type</label>
             <div className="flex gap-2">
-              {(["whole_place", "private_room", "shared_room"] as const).map((v) => {
-                const labels: Record<string, string> = { whole_place: "Whole place", private_room: "Private room", shared_room: "Shared room" };
+              {LEASE_TYPES.map((v) => {
+                const leaseTypeLabels: Record<typeof LEASE_TYPES[number], string> = { whole_place: "Whole place", private_room: "Private room", shared_room: "Shared room" };
                 const selected = leaseType === v;
                 return (
                   <button
@@ -360,7 +360,7 @@ export default function ListingForm({ onImagesChange, initialValues, mode = "cre
                     onClick={() => setLeaseType(selected ? "" : v)}
                     className={`px-4 py-2 text-sm font-semibold rounded-xl border transition ${selected ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-700 border-slate-200 hover:border-indigo-300"}`}
                   >
-                    {labels[v]}
+                    {leaseTypeLabels[v]}
                   </button>
                 );
               })}
@@ -370,8 +370,8 @@ export default function ListingForm({ onImagesChange, initialValues, mode = "cre
           <div>
             <label className={labelCls}>Furnished</label>
             <div className="flex gap-2">
-              {(["furnished", "partially", "unfurnished"] as const).map((v) => {
-                const labels: Record<string, string> = { furnished: "Furnished", partially: "Partially", unfurnished: "Unfurnished" };
+              {FURNISHED_OPTIONS.map((v) => {
+                const furnishedLabels: Record<typeof FURNISHED_OPTIONS[number], string> = { furnished: "Furnished", partially: "Partially", unfurnished: "Unfurnished" };
                 const selected = furnished === v;
                 return (
                   <button
@@ -380,7 +380,7 @@ export default function ListingForm({ onImagesChange, initialValues, mode = "cre
                     onClick={() => setFurnished(selected ? "" : v)}
                     className={`px-4 py-2 text-sm font-semibold rounded-xl border transition ${selected ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-700 border-slate-200 hover:border-indigo-300"}`}
                   >
-                    {labels[v]}
+                    {furnishedLabels[v]}
                   </button>
                 );
               })}

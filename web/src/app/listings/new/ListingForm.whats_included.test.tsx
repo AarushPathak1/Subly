@@ -92,9 +92,9 @@ describe("ListingForm — What's Included section", () => {
   });
 
   it("all amenity checkboxes start unchecked", () => {
-    const checkboxes = document.querySelectorAll<HTMLInputElement>(
+    const checkboxes = Array.from(document.querySelectorAll<HTMLInputElement>(
       'input[type="checkbox"][name="amenities"]'
-    );
+    ));
     for (const cb of checkboxes) {
       expect(cb.checked).toBe(false);
     }
@@ -138,9 +138,9 @@ describe("ListingForm — What's Included section", () => {
   });
 
   it("all utility checkboxes start unchecked", () => {
-    const checkboxes = document.querySelectorAll<HTMLInputElement>(
+    const checkboxes = Array.from(document.querySelectorAll<HTMLInputElement>(
       'input[type="checkbox"][name="utilities_included"]'
-    );
+    ));
     for (const cb of checkboxes) {
       expect(cb.checked).toBe(false);
     }
