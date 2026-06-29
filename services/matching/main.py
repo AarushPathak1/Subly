@@ -35,7 +35,7 @@ openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
 index = pc.Index(os.environ.get("PINECONE_INDEX", "subly-listings"))
 
-_db_pool = pg_pool.ThreadedConnectionPool(minconn=2, maxconn=10, dsn=os.environ["DATABASE_URL"])
+_db_pool = pg_pool.ThreadedConnectionPool(minconn=4, maxconn=20, dsn=os.environ["DATABASE_URL"])
 
 
 def get_db():
@@ -55,6 +55,93 @@ def embed_text(text: str) -> list[float]:
         model="text-embedding-3-small", input=text
     )
     return response.data[0].embedding
+
+
+def _load_or_compute_user_embedding(
+    user_id: str,
+) -> tuple[list[float], Optional[str], Optional[str], Optional[int], Optional[int]]:
+    """
+    Sync helper (run inside asyncio.to_thread). Reads user_profiles for the
+    given user_id. Returns (embedding, vibe_text, university, max_rent_cents,
+    min_bedrooms). On cache miss, calls OpenAI, writes result back, returns it.
+    Two concurrent misses both call OpenAI and both write (last-writer-wins,
+    idempotent). Raises HTTPException(404) if no profile row exists.
+    """
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT vibe_text, university, max_rent_cents, min_bedrooms,
+                          preference_embedding
+                   FROM user_profiles WHERE user_id = %s""",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User profile not found")
+
+        vibe_text, university, max_rent_cents, min_bedrooms, cached_embedding = row
+
+        if cached_embedding is not None:
+            return list(cached_embedding), vibe_text, university, max_rent_cents, min_bedrooms
+
+        # Cache miss — build query text and embed
+        parts = [f"Looking for a place near {university or 'campus'}."]
+        if min_bedrooms:
+            parts.append(f"{min_bedrooms}+ bedrooms.")
+        if max_rent_cents:
+            parts.append(f"Budget up to ${max_rent_cents / 100:.0f}/month.")
+        if vibe_text:
+            parts.append(vibe_text)
+        query_text = " ".join(parts)
+
+        try:
+            embedding = embed_text(query_text)
+        except Exception as e:
+            log.error(f"OpenAI embed failed for user {user_id}: {e}")
+            raise HTTPException(status_code=502, detail="Embedding service unavailable")
+
+        # Write back — best-effort; don't fail the request if the UPDATE fails
+        try:
+            with conn.cursor() as upd:
+                upd.execute(
+                    "UPDATE user_profiles SET preference_embedding = %s WHERE user_id = %s",
+                    (embedding, user_id),
+                )
+        except Exception as e:
+            log.warning(f"Failed to cache preference_embedding for user {user_id}: {e}")
+
+        return embedding, vibe_text, university, max_rent_cents, min_bedrooms
+    finally:
+        release_db(conn)
+
+
+def _fetch_listing_details(
+    listing_ids: list[str],
+) -> tuple[dict[str, float], dict[str, dict]]:
+    """Sync helper. Batch-fetches scam scores and card metadata from Postgres."""
+    scam_scores: dict[str, float] = {}
+    listing_details: dict[str, dict] = {}
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id::text, scam_score, title, address, images, available_from::text
+                   FROM listings WHERE id = ANY(%s::uuid[])""",
+                (listing_ids,),
+            )
+            for row in cur.fetchall():
+                lid, scam_score, title, address, images, available_from = row
+                scam_scores[lid] = float(scam_score)
+                listing_details[lid] = {
+                    "title": title,
+                    "address": address,
+                    "image_url": images[0] if images else None,
+                    "available_from": available_from,
+                }
+    finally:
+        release_db(conn)
+    return scam_scores, listing_details
 
 
 # ─── RabbitMQ consumers ──────────────────────────────────────────────────────
@@ -228,84 +315,38 @@ def health():
 
 
 @app.get("/matches/{user_id}", response_model=list[MatchResult])
-def get_matches(user_id: str, x_user_id: Optional[str] = Header(default=None)):
-    """
-    Fetch a user's preferences from user_profiles, synthesize a vibe query,
-    and return the top 5 semantically similar listings from Pinecone.
-    Hard filters on university, rent, and bedrooms narrow the candidate set
-    before vector similarity re-ranks it.
-
-    The gateway injects X-User-ID for authenticated callers; this service is
-    never reachable directly from the internet. We defensively require it
-    (401 if missing) and reject any caller asking for a user_id other than
-    their own (403).
-    """
+async def get_matches(user_id: str, x_user_id: Optional[str] = Header(default=None)):
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Missing X-User-ID header")
     if x_user_id != user_id:
         raise HTTPException(status_code=403, detail="Cannot access another user's matches")
 
-    conn = get_db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """SELECT vibe_text, university, max_rent_cents, min_bedrooms
-                   FROM user_profiles WHERE user_id = %s""",
-                (user_id,),
-            )
-            prefs = cur.fetchone()
-        if not prefs:
-            raise HTTPException(status_code=404, detail="User profile not found")
+    embedding, vibe_text, university, max_rent_cents, min_bedrooms = \
+        await asyncio.to_thread(_load_or_compute_user_embedding, user_id)
 
-        vibe_text, university, max_rent_cents, min_bedrooms = prefs
+    filter_dict: dict = {}
+    if university:
+        filter_dict["university"] = {"$eq": university.upper()}
+    if max_rent_cents:
+        filter_dict["rent_cents"] = {"$lte": max_rent_cents}
+    if min_bedrooms:
+        filter_dict["bedrooms"] = {"$gte": min_bedrooms}
 
-        parts = [f"Looking for a place near {university or 'campus'}."]
-        if min_bedrooms:
-            parts.append(f"{min_bedrooms}+ bedrooms.")
-        if max_rent_cents:
-            parts.append(f"Budget up to ${max_rent_cents / 100:.0f}/month.")
-        if vibe_text:
-            parts.append(vibe_text)
-        query_text = " ".join(parts)
+    results = await asyncio.to_thread(
+        index.query,
+        vector=embedding,
+        top_k=5,
+        filter=filter_dict if filter_dict else None,
+        include_metadata=True,
+    )
 
-        embedding = embed_text(query_text)
-
-        filter_dict: dict = {}
-        if university:
-            filter_dict["university"] = {"$eq": university.upper()}
-        if max_rent_cents:
-            filter_dict["rent_cents"] = {"$lte": max_rent_cents}
-        if min_bedrooms:
-            filter_dict["bedrooms"] = {"$gte": min_bedrooms}
-
-        results = index.query(
-            vector=embedding,
-            top_k=5,
-            filter=filter_dict if filter_dict else None,
-            include_metadata=True,
+    listing_ids = [m["id"] for m in results["matches"]]
+    scam_scores: dict[str, float] = {}
+    listing_details: dict[str, dict] = {}
+    if listing_ids:
+        scam_scores, listing_details = await asyncio.to_thread(
+            _fetch_listing_details, listing_ids
         )
-
-        listing_ids = [m["id"] for m in results["matches"]]
-        scam_scores: dict[str, float] = {}
-        listing_details: dict[str, dict] = {}
-        if listing_ids:
-            with conn.cursor() as scam_cur:
-                scam_cur.execute(
-                    """SELECT id::text, scam_score, title, address, images, available_from::text
-                       FROM listings WHERE id = ANY(%s::uuid[])""",
-                    (listing_ids,),
-                )
-                for row in scam_cur.fetchall():
-                    listing_id, scam_score, title, address, images, available_from = row
-                    scam_scores[listing_id] = float(scam_score)
-                    listing_details[listing_id] = {
-                        "title": title,
-                        "address": address,
-                        "image_url": images[0] if images else None,
-                        "available_from": available_from,
-                    }
-    finally:
-        release_db(conn)
 
     return [
         MatchResult(
@@ -326,24 +367,18 @@ def get_matches(user_id: str, x_user_id: Optional[str] = Header(default=None)):
 
 
 @app.post("/search", response_model=list[SearchResult])
-def search(req: SearchRequest, x_user_id: Optional[str] = Header(default=None)):
-    """
-    Semantic search over listings — generic, not personalized.
-
-    The gateway injects X-User-ID for authenticated callers; this service is
-    never reachable directly from the internet. We defensively require it
-    (401 if missing), mirroring /matches/{user_id}.
-    """
+async def search(req: SearchRequest, x_user_id: Optional[str] = Header(default=None)):
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Missing X-User-ID header")
 
-    query_embedding = embed_text(req.query)
+    query_embedding = await asyncio.to_thread(embed_text, req.query)
 
     filter_dict = {}
     if req.university:
         filter_dict["university"] = {"$eq": req.university.upper()}
 
-    results = index.query(
+    results = await asyncio.to_thread(
+        index.query,
         vector=query_embedding,
         top_k=req.top_k,
         filter=filter_dict if filter_dict else None,

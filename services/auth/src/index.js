@@ -464,7 +464,7 @@ app.post("/profile", requireAuth(), async (req, res) => {
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (user_id) DO UPDATE
          SET vibe_text = $2, university = $3, max_rent_cents = $4,
-             min_bedrooms = $5, updated_at = NOW()
+             min_bedrooms = $5, preference_embedding = NULL, updated_at = NOW()
        RETURNING id`,
       [userRows[0].id, vibe_text, university, max_rent_cents, min_bedrooms]
     );

@@ -1998,7 +1998,17 @@ func main() {
 
 	ctx := context.Background()
 
-	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	poolCfg, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatal("db config parse failed", "error", err)
+	}
+	poolCfg.MaxConns = 25
+	poolCfg.MinConns = 5
+	poolCfg.MaxConnLifetime = 30 * time.Minute
+	poolCfg.MaxConnIdleTime = 5 * time.Minute
+	poolCfg.HealthCheckPeriod = 1 * time.Minute
+
+	db, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		log.Fatal("db connect failed", "error", err)
 	}

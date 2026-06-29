@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     university      TEXT,                       -- target university / area
     max_rent_cents  INT,                        -- upper rent budget in cents
     min_bedrooms    SMALLINT DEFAULT 1,
+    preference_embedding FLOAT8[],
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
@@ -189,3 +190,34 @@ CREATE TABLE IF NOT EXISTS reports (
 
 CREATE INDEX IF NOT EXISTS reports_target_idx ON reports(target_kind, target_id);
 CREATE INDEX IF NOT EXISTS reports_status_created_idx ON reports(status, created_at DESC);
+
+-- ─── Perf indexes ─────────────────────────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS listings_status_created_idx
+    ON listings(status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS listings_user_status_created_idx
+    ON listings(user_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS listings_univ_status_created_idx
+    ON listings(university_near, status, created_at DESC)
+    WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS reviews_listing_published_idx
+    ON reviews(listing_id, published)
+    WHERE published = true;
+
+CREATE INDEX IF NOT EXISTS reviews_conversation_idx
+    ON reviews(conversation_id);
+
+CREATE INDEX IF NOT EXISTS conversations_confirmed_at_idx
+    ON conversations(confirmed_at)
+    WHERE confirmed_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS conversations_renter_last_msg_idx
+    ON conversations(renter_id, last_message_at DESC NULLS LAST);
+
+CREATE INDEX IF NOT EXISTS conversations_lister_last_msg_idx
+    ON conversations(lister_id, last_message_at DESC NULLS LAST);
+
+CREATE INDEX IF NOT EXISTS reports_reporter_status_idx
+    ON reports(reporter_id, status);

@@ -136,27 +136,13 @@ class TestMatchesEndpoint:
         """
         /matches/{user_id} returns a list when user profile exists and the
         X-User-ID header matches the requested user_id.
+
+        After the embedding-cache refactor, _load_or_compute_user_embedding and
+        _fetch_listing_details manage their own DB connections internally.  We
+        mock both helpers directly so the handler wiring is tested without
+        reimplementing their internal cursor sequences.
         """
         fake_embedding = [0.5] * 1536
-
-        profile_cursor = MagicMock()
-        profile_cursor.fetchone.return_value = ("quiet place near campus", "UT AUSTIN", 150000, 2)
-
-        scam_cursor = MagicMock()
-        scam_cursor.fetchall.return_value = [
-            ("listing-xyz", 0.1, "Cozy 2BR near UT", "123 Main St", ["https://example.com/photo.jpg"], "2026-05-15")
-        ]
-
-        cm_profile = MagicMock()
-        cm_profile.__enter__.return_value = profile_cursor
-        cm_profile.__exit__.return_value = False
-
-        cm_scam = MagicMock()
-        cm_scam.__enter__.return_value = scam_cursor
-        cm_scam.__exit__.return_value = False
-
-        mock_conn = MagicMock()
-        mock_conn.cursor.side_effect = [cm_profile, cm_scam]
 
         pinecone_results = {
             "matches": [
@@ -168,8 +154,19 @@ class TestMatchesEndpoint:
             ]
         }
 
-        with patch.object(matching_main, "get_db", return_value=mock_conn):
-            with patch.object(matching_main, "embed_text", return_value=fake_embedding):
+        # _load_or_compute_user_embedding returns (embedding, vibe, university, max_rent, min_bed)
+        loce_return = (fake_embedding, "quiet place near campus", "UT AUSTIN", 150000, 2)
+        # _fetch_listing_details returns (scam_scores_dict, listing_details_dict)
+        listing_detail = {
+            "title": "Cozy 2BR near UT",
+            "address": "123 Main St",
+            "image_url": "https://example.com/photo.jpg",
+            "available_from": "2026-05-15",
+        }
+        fetch_return = ({"listing-xyz": 0.1}, {"listing-xyz": listing_detail})
+
+        with patch.object(matching_main, "_load_or_compute_user_embedding", return_value=loce_return):
+            with patch.object(matching_main, "_fetch_listing_details", return_value=fetch_return):
                 with patch.object(matching_main, "index") as mock_idx:
                     mock_idx.query.return_value = pinecone_results
                     resp = client.get(
@@ -192,25 +189,10 @@ class TestMatchesEndpoint:
         If a Pinecone match's listing_id has no corresponding row in the
         listings table (e.g. deleted), title/address/image_url/available_from
         should be null rather than raising a KeyError.
+
+        After the embedding-cache refactor we mock both helpers directly.
         """
         fake_embedding = [0.5] * 1536
-
-        profile_cursor = MagicMock()
-        profile_cursor.fetchone.return_value = ("quiet place near campus", "UT AUSTIN", 150000, 2)
-
-        scam_cursor = MagicMock()
-        scam_cursor.fetchall.return_value = []  # no matching listing row
-
-        cm_profile = MagicMock()
-        cm_profile.__enter__.return_value = profile_cursor
-        cm_profile.__exit__.return_value = False
-
-        cm_scam = MagicMock()
-        cm_scam.__enter__.return_value = scam_cursor
-        cm_scam.__exit__.return_value = False
-
-        mock_conn = MagicMock()
-        mock_conn.cursor.side_effect = [cm_profile, cm_scam]
 
         pinecone_results = {
             "matches": [
@@ -222,8 +204,12 @@ class TestMatchesEndpoint:
             ]
         }
 
-        with patch.object(matching_main, "get_db", return_value=mock_conn):
-            with patch.object(matching_main, "embed_text", return_value=fake_embedding):
+        loce_return = (fake_embedding, "quiet place near campus", "UT AUSTIN", 150000, 2)
+        # _fetch_listing_details returns empty dicts — the listing row was deleted
+        fetch_return = ({}, {})
+
+        with patch.object(matching_main, "_load_or_compute_user_embedding", return_value=loce_return):
+            with patch.object(matching_main, "_fetch_listing_details", return_value=fetch_return):
                 with patch.object(matching_main, "index") as mock_idx:
                     mock_idx.query.return_value = pinecone_results
                     resp = client.get(
