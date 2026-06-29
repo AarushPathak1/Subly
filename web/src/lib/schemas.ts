@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+export const LEASE_TYPES = ["whole_place", "private_room", "shared_room"] as const;
+export const FURNISHED_OPTIONS = ["furnished", "partially", "unfurnished"] as const;
+export const AMENITY_OPTIONS = [
+  "WiFi", "In-unit Laundry", "Dishwasher", "AC", "Heat Included",
+  "Parking", "Gym", "Pool", "Balcony", "Dog-friendly", "Cat-friendly", "Smoke-free",
+] as const;
+export const UTILITY_OPTIONS = ["Water", "Electric", "Gas", "Internet", "Trash"] as const;
+
 export const VerifyEmailSchema = z.object({
   email: z
     .string()
@@ -32,6 +40,8 @@ export const ListingSchema = z.object({
   available_to: z.string().optional().default(""),
   bedrooms: z.string().min(1),
   bathrooms: z.string().min(1),
+  lease_type: z.enum(LEASE_TYPES).optional().or(z.literal("")).default(""),
+  furnished: z.enum(FURNISHED_OPTIONS).optional().or(z.literal("")).default(""),
 });
 
 export type ListingFormValues = z.infer<typeof ListingSchema>;

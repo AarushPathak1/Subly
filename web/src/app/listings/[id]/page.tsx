@@ -7,6 +7,7 @@ import { ReviewsSection } from "@/components/ReviewsSection";
 import { ReportButton } from "@/components/ReportButton";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { leaseSummary } from "@/lib/leaseSummary";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -28,7 +29,21 @@ interface Listing {
   scam_score: number;
   view_count: number;
   created_at: string;
+  lease_type?: string;
+  furnished?: string;
+  utilities_included?: string[];
 }
+
+const LEASE_LABELS: Record<string, string> = {
+  whole_place: "Whole place",
+  private_room: "Private room",
+  shared_room: "Shared room",
+};
+const FURNISHED_LABELS: Record<string, string> = {
+  furnished: "Furnished",
+  partially: "Partially furnished",
+  unfurnished: "Unfurnished",
+};
 
 function TrustBadge({ score }: { score: number }) {
   if (score > 0.7) return (
@@ -148,6 +163,7 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
               <div className="bg-indigo-50 rounded-xl p-4">
                 <p className="text-xs text-indigo-500 font-semibold mb-1">Monthly rent</p>
                 <p className="text-xl font-extrabold text-indigo-900">{rent}</p>
+                <p className="text-[11px] text-indigo-700/80 mt-1 leading-tight">{leaseSummary(listing)}</p>
               </div>
               <div className="bg-slate-50 rounded-xl p-4">
                 <p className="text-xs text-slate-500 font-semibold mb-1">Bedrooms</p>
@@ -194,19 +210,46 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
                 </dl>
               </div>
 
-              {listing.amenities && listing.amenities.length > 0 && (
-                <div>
-                  <h2 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">Amenities</h2>
-                  <div className="flex flex-wrap gap-2">
-                    {listing.amenities.map((a) => (
-                      <span key={a} className="text-xs font-medium px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full">
-                        {a}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
+
+            {/* What's Included */}
+            {(listing.lease_type || listing.furnished || (listing.utilities_included && listing.utilities_included.length > 0) || (listing.amenities && listing.amenities.length > 0)) && (
+              <div className="mb-8">
+                <h2 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">What&apos;s Included</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                  {listing.lease_type && LEASE_LABELS[listing.lease_type] && (
+                    <div className="bg-slate-50 rounded-xl p-3">
+                      <p className="text-xs text-slate-500 font-semibold mb-1">Lease type</p>
+                      <p className="text-sm font-bold text-slate-900">{LEASE_LABELS[listing.lease_type]}</p>
+                    </div>
+                  )}
+                  {listing.furnished && FURNISHED_LABELS[listing.furnished] && (
+                    <div className="bg-slate-50 rounded-xl p-3">
+                      <p className="text-xs text-slate-500 font-semibold mb-1">Furnished</p>
+                      <p className="text-sm font-bold text-slate-900">{FURNISHED_LABELS[listing.furnished]}</p>
+                    </div>
+                  )}
+                  {listing.utilities_included && listing.utilities_included.length > 0 && (
+                    <div className="bg-slate-50 rounded-xl p-3 col-span-2">
+                      <p className="text-xs text-slate-500 font-semibold mb-1">Utilities included</p>
+                      <p className="text-sm font-bold text-slate-900">{listing.utilities_included.join(", ")}</p>
+                    </div>
+                  )}
+                </div>
+                {listing.amenities && listing.amenities.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-500 font-semibold mb-2">Amenities</p>
+                    <div className="flex flex-wrap gap-2">
+                      {listing.amenities.map((a) => (
+                        <span key={a} className="text-xs font-medium px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full">
+                          {a}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Trust score breakdown */}
             {listing.scam_score > 0.4 && (

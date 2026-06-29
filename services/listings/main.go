@@ -38,8 +38,11 @@ type Listing struct {
 	AvailableTo    string    `json:"available_to,omitempty"`
 	Bedrooms       int       `json:"bedrooms"`
 	Bathrooms      float64   `json:"bathrooms"`
-	Amenities      []string  `json:"amenities"`
-	Images         []string  `json:"images"`
+	Amenities         []string `json:"amenities"`
+	LeaseType         string   `json:"lease_type"`
+	Furnished         string   `json:"furnished"`
+	UtilitiesIncluded []string `json:"utilities_included"`
+	Images            []string `json:"images"`
 	Status         string    `json:"status"`
 	ScamScore      float64   `json:"scam_score"`
 	ViewCount      int       `json:"view_count"`
@@ -212,7 +215,8 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	const selectCols = `SELECT l.id, l.user_id, l.title, l.description, l.address, l.university_near,
 	              l.rent_cents, l.available_from::text, l.available_to::text, l.bedrooms, l.bathrooms,
-	              l.amenities, l.images, l.status, l.scam_score, l.view_count, l.created_at, l.updated_at
+	              l.amenities, l.images, l.status, l.scam_score, l.view_count, l.created_at, l.updated_at,
+	              l.lease_type, l.furnished, l.utilities_included
 	              FROM listings l JOIN users u ON u.id = l.user_id`
 
 	userID := r.URL.Query().Get("user_id")
@@ -243,14 +247,23 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var l Listing
 		var description, universityNear, availableTo sql.NullString
+		var lType, furn sql.NullString
+		var utils []string
 		if err := rows.Scan(&l.ID, &l.UserID, &l.Title, &description, &l.Address,
 			&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
 			&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
-			&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt,
+			&lType, &furn, &utils); err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
 		l.Description, l.UniversityNear, l.AvailableTo = description.String, universityNear.String, availableTo.String
+		l.LeaseType = lType.String
+		l.Furnished = furn.String
+		l.UtilitiesIncluded = utils
+		if l.UtilitiesIncluded == nil {
+			l.UtilitiesIncluded = []string{}
+		}
 		if r.Header.Get("X-User-ID") != l.UserID {
 			l.ScamScore = 0
 		}
@@ -265,7 +278,14 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 // available_from/available_to are passed as strings (possibly empty, meaning
 // "not provided in this request") since both handleCreate and handleUpdate
 // work with string-typed date fields.
-func validateListingFields(title, description, address string, rentCents, bedrooms int, bathrooms float64, availableFrom, availableTo string) string {
+func validateListingFields(
+	title, description, address string,
+	rentCents, bedrooms int,
+	bathrooms float64,
+	availableFrom, availableTo string,
+	leaseType, furnished string,
+	amenities, utilitiesIncluded []string,
+) string {
 	if rentCents < 10000 || rentCents > 5000000 {
 		return "invalid_rent_cents"
 	}
@@ -287,6 +307,28 @@ func validateListingFields(title, description, address string, rentCents, bedroo
 	if n := len([]rune(address)); n < 5 || n > 500 {
 		return "invalid_address"
 	}
+	if leaseType != "" && leaseType != "whole_place" && leaseType != "private_room" && leaseType != "shared_room" {
+		return "invalid_lease_type"
+	}
+	if furnished != "" && furnished != "furnished" && furnished != "partially" && furnished != "unfurnished" {
+		return "invalid_furnished"
+	}
+	if len(amenities) > 30 {
+		return "invalid_amenities"
+	}
+	for _, a := range amenities {
+		if n := len([]rune(strings.TrimSpace(a))); n == 0 || n > 50 {
+			return "invalid_amenities"
+		}
+	}
+	if len(utilitiesIncluded) > 10 {
+		return "invalid_utilities_included"
+	}
+	for _, u := range utilitiesIncluded {
+		if n := len([]rune(strings.TrimSpace(u))); n == 0 || n > 50 {
+			return "invalid_utilities_included"
+		}
+	}
 	return ""
 }
 
@@ -303,7 +345,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if code := validateListingFields(body.Title, body.Description, body.Address, body.RentCents, body.Bedrooms, body.Bathrooms, body.AvailableFrom, body.AvailableTo); code != "" {
+	if code := validateListingFields(body.Title, body.Description, body.Address, body.RentCents, body.Bedrooms, body.Bathrooms, body.AvailableFrom, body.AvailableTo, body.LeaseType, body.Furnished, body.Amenities, body.UtilitiesIncluded); code != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": code})
 		return
 	}
@@ -313,17 +355,24 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if body.AvailableTo != "" {
 		availableTo = body.AvailableTo
 	}
+	var leaseTypeVal, furnishedVal interface{}
+	if body.LeaseType != "" {
+		leaseTypeVal = body.LeaseType
+	}
+	if body.Furnished != "" {
+		furnishedVal = body.Furnished
+	}
 	var id string
 	err := s.db.QueryRow(ctx,
 		`INSERT INTO listings
 		   (user_id, title, description, address, university_near,
 		    rent_cents, available_from, available_to, bedrooms, bathrooms,
-		    amenities, images, status)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'draft')
+		    amenities, lease_type, furnished, utilities_included, images, status)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'draft')
 		 RETURNING id`,
 		userID, body.Title, body.Description, body.Address, body.UniversityNear,
 		body.RentCents, body.AvailableFrom, availableTo,
-		body.Bedrooms, body.Bathrooms, body.Amenities, body.Images,
+		body.Bedrooms, body.Bathrooms, body.Amenities, leaseTypeVal, furnishedVal, body.UtilitiesIncluded, body.Images,
 	).Scan(&id)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, err)
@@ -347,6 +396,8 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	}
 	var l Listing
 	var description, universityNear, availableTo sql.NullString
+	var leaseType, furnished sql.NullString
+	var utilitiesIncluded []string
 	err := s.db.QueryRow(r.Context(),
 		`WITH bumped AS (
 		    UPDATE listings
@@ -356,25 +407,34 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 		       AND status NOT IN ('draft', 'expired')
 		    RETURNING id, user_id, title, description, address, university_near,
 		              rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
-		              amenities, images, status, scam_score, view_count, created_at, updated_at
+		              amenities, images, status, scam_score, view_count, created_at, updated_at,
+		              lease_type, furnished, utilities_included
 		)
 		SELECT * FROM bumped
 		UNION ALL
 		SELECT id, user_id, title, description, address, university_near,
 		       rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
-		       amenities, images, status, scam_score, view_count, created_at, updated_at
+		       amenities, images, status, scam_score, view_count, created_at, updated_at,
+		       lease_type, furnished, utilities_included
 		  FROM listings
 		 WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM bumped)
 		 LIMIT 1`, id, userID,
 	).Scan(&l.ID, &l.UserID, &l.Title, &description, &l.Address,
 		&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
 		&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
-		&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt)
+		&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt,
+		&leaseType, &furnished, &utilitiesIncluded)
 	if err != nil {
 		writeErr(w, r, http.StatusNotFound, err)
 		return
 	}
 	l.Description, l.UniversityNear, l.AvailableTo = description.String, universityNear.String, availableTo.String
+	l.LeaseType = leaseType.String
+	l.Furnished = furnished.String
+	l.UtilitiesIncluded = utilitiesIncluded
+	if l.UtilitiesIncluded == nil {
+		l.UtilitiesIncluded = []string{}
+	}
 	if userID != l.UserID {
 		l.ScamScore = 0
 
@@ -394,18 +454,21 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 
 	var body struct {
-		Title          *string  `json:"title"`
-		Description    *string  `json:"description"`
-		Address        *string  `json:"address"`
-		UniversityNear *string  `json:"university_near"`
-		RentCents      *int     `json:"rent_cents"`
-		AvailableFrom  *string  `json:"available_from"`
-		AvailableTo    *string  `json:"available_to"`
-		Bedrooms       *int     `json:"bedrooms"`
-		Bathrooms      *float64 `json:"bathrooms"`
-		Amenities      []string `json:"amenities"`
-		Images         []string `json:"images"`
-		Status         *string  `json:"status"`
+		Title             *string  `json:"title"`
+		Description       *string  `json:"description"`
+		Address           *string  `json:"address"`
+		UniversityNear    *string  `json:"university_near"`
+		RentCents         *int     `json:"rent_cents"`
+		AvailableFrom     *string  `json:"available_from"`
+		AvailableTo       *string  `json:"available_to"`
+		Bedrooms          *int     `json:"bedrooms"`
+		Bathrooms         *float64 `json:"bathrooms"`
+		Amenities         []string `json:"amenities"`
+		Images            []string `json:"images"`
+		Status            *string  `json:"status"`
+		LeaseType         *string  `json:"lease_type"`
+		Furnished         *string  `json:"furnished"`
+		UtilitiesIncluded []string `json:"utilities_included"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, r, http.StatusBadRequest, err)
@@ -444,9 +507,14 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	newBedrooms, newBathrooms := 0, 0.0
 	var newAvailableFrom, newAvailableTo string
+	var curLeaseType, curFurnished sql.NullString
+	var curUtilitiesIncluded []string
 	if err := s.db.QueryRow(ctx,
-		`SELECT bedrooms, bathrooms, available_from::text, COALESCE(available_to::text, '') FROM listings WHERE id = $1`, id,
-	).Scan(&newBedrooms, &newBathrooms, &newAvailableFrom, &newAvailableTo); err != nil {
+		`SELECT bedrooms, bathrooms, available_from::text, COALESCE(available_to::text, ''),
+		        lease_type, furnished, utilities_included
+		 FROM listings WHERE id = $1`, id,
+	).Scan(&newBedrooms, &newBathrooms, &newAvailableFrom, &newAvailableTo,
+		&curLeaseType, &curFurnished, &curUtilitiesIncluded); err != nil {
 		writeErr(w, r, http.StatusNotFound, fmt.Errorf("listing not found"))
 		return
 	}
@@ -463,7 +531,22 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		newAvailableTo = *body.AvailableTo
 	}
 
-	if code := validateListingFields(newTitle, newDescription, newAddress, newRentCents, newBedrooms, newBathrooms, newAvailableFrom, newAvailableTo); code != "" {
+	newLeaseType := curLeaseType.String
+	newFurnished := curFurnished.String
+	newUtilitiesIncluded := curUtilitiesIncluded
+	if body.LeaseType != nil {
+		newLeaseType = *body.LeaseType
+	}
+	if body.Furnished != nil {
+		newFurnished = *body.Furnished
+	}
+	if body.UtilitiesIncluded != nil {
+		newUtilitiesIncluded = body.UtilitiesIncluded
+	}
+
+	newAmenities := body.Amenities
+
+	if code := validateListingFields(newTitle, newDescription, newAddress, newRentCents, newBedrooms, newBathrooms, newAvailableFrom, newAvailableTo, newLeaseType, newFurnished, newAmenities, newUtilitiesIncluded); code != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": code})
 		return
 	}
@@ -517,6 +600,23 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if body.Status != nil {
 		add("status", *body.Status)
 	}
+	if body.LeaseType != nil {
+		var v interface{}
+		if *body.LeaseType != "" {
+			v = *body.LeaseType
+		}
+		add("lease_type", v)
+	}
+	if body.Furnished != nil {
+		var v interface{}
+		if *body.Furnished != "" {
+			v = *body.Furnished
+		}
+		add("furnished", v)
+	}
+	if body.UtilitiesIncluded != nil {
+		add("utilities_included", body.UtilitiesIncluded)
+	}
 
 	// A trust-relevant edit invalidates the existing scam score and trust
 	// badge — force the listing back to draft (even if it was active/paused/
@@ -568,19 +668,29 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 func (s *server) fetchListingForEmbedding(ctx context.Context, id string) (Listing, error) {
 	var l Listing
 	var description, universityNear, availableTo sql.NullString
+	var leaseType, furnished sql.NullString
+	var utilitiesIncluded []string
 	err := s.db.QueryRow(ctx,
 		`SELECT id, user_id, title, description, address, university_near,
 		        rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
-		        amenities, images, status, scam_score, view_count, created_at, updated_at
+		        amenities, images, status, scam_score, view_count, created_at, updated_at,
+		        lease_type, furnished, utilities_included
 		   FROM listings WHERE id = $1`, id,
 	).Scan(&l.ID, &l.UserID, &l.Title, &description, &l.Address,
 		&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
 		&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
-		&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt)
+		&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt,
+		&leaseType, &furnished, &utilitiesIncluded)
 	if err != nil {
 		return Listing{}, err
 	}
 	l.Description, l.UniversityNear, l.AvailableTo = description.String, universityNear.String, availableTo.String
+	l.LeaseType = leaseType.String
+	l.Furnished = furnished.String
+	l.UtilitiesIncluded = utilitiesIncluded
+	if l.UtilitiesIncluded == nil {
+		l.UtilitiesIncluded = []string{}
+	}
 	return l, nil
 }
 
@@ -1714,7 +1824,8 @@ func (s *server) handleListSaved(w http.ResponseWriter, r *http.Request) {
 		SELECT l.id, l.user_id, l.title, l.description, l.address, l.university_near,
 		       l.rent_cents, l.available_from::text, l.available_to::text,
 		       l.bedrooms, l.bathrooms, l.amenities, l.images,
-		       l.status, l.scam_score, l.view_count, l.created_at, l.updated_at, sl.created_at
+		       l.status, l.scam_score, l.view_count, l.created_at, l.updated_at,
+		       l.lease_type, l.furnished, l.utilities_included, sl.created_at
 		FROM saved_listings sl
 		JOIN listings l ON l.id = sl.listing_id
 		WHERE sl.user_id = $1
@@ -1730,14 +1841,23 @@ func (s *server) handleListSaved(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var sl SavedListing
 		var description, universityNear, availableTo sql.NullString
+		var lType, furn sql.NullString
+		var utils []string
 		if err := rows.Scan(&sl.ID, &sl.UserID, &sl.Title, &description, &sl.Address,
 			&universityNear, &sl.RentCents, &sl.AvailableFrom, &availableTo,
 			&sl.Bedrooms, &sl.Bathrooms, &sl.Amenities, &sl.Images,
-			&sl.Status, &sl.ScamScore, &sl.ViewCount, &sl.CreatedAt, &sl.UpdatedAt, &sl.SavedAt); err != nil {
+			&sl.Status, &sl.ScamScore, &sl.ViewCount, &sl.CreatedAt, &sl.UpdatedAt,
+			&lType, &furn, &utils, &sl.SavedAt); err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
 		sl.Description, sl.UniversityNear, sl.AvailableTo = description.String, universityNear.String, availableTo.String
+		sl.LeaseType = lType.String
+		sl.Furnished = furn.String
+		sl.UtilitiesIncluded = utils
+		if sl.UtilitiesIncluded == nil {
+			sl.UtilitiesIncluded = []string{}
+		}
 		if userID != sl.UserID {
 			sl.ScamScore = 0
 		}

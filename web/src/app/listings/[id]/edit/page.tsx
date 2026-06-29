@@ -21,6 +21,10 @@ interface Listing {
   bathrooms: number;
   images: string[];
   status: string;
+  amenities?: string[];
+  lease_type?: string;
+  furnished?: string;
+  utilities_included?: string[];
 }
 
 export default async function EditListingPage({ params }: { params: { id: string } }) {
@@ -53,6 +57,10 @@ export default async function EditListingPage({ params }: { params: { id: string
     available_from: listing.available_from,
     available_to: listing.available_to ?? "",
     images: listing.images ?? [],
+    amenities: listing.amenities ?? [],
+    lease_type: listing.lease_type ?? "",
+    furnished: listing.furnished ?? "",
+    utilities_included: listing.utilities_included ?? [],
   };
 
   return (

@@ -42,7 +42,7 @@ func TestValidateListingFields_TableDriven(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := validateListingFields(c.title, c.description, c.address, c.rentCents, c.bedrooms, c.bathrooms, c.availableFrom, c.availableTo)
+			got := validateListingFields(c.title, c.description, c.address, c.rentCents, c.bedrooms, c.bathrooms, c.availableFrom, c.availableTo, "", "", nil, nil)
 			if got != c.wantCode {
 				t.Errorf("expected %q, got %q", c.wantCode, got)
 			}

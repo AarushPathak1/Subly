@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS listings (
     bedrooms        SMALLINT DEFAULT 1,
     bathrooms       NUMERIC(3,1) DEFAULT 1,
     amenities       TEXT[],
+    lease_type      TEXT CONSTRAINT listings_lease_type_check CHECK (lease_type IS NULL OR lease_type IN ('whole_place','private_room','shared_room')),
+    furnished       TEXT CONSTRAINT listings_furnished_check  CHECK (furnished  IS NULL OR furnished  IN ('furnished','partially','unfurnished')),
+    utilities_included TEXT[],
     images          TEXT[],                   -- S3/CDN URLs
     status          listing_status DEFAULT 'draft',
     embedding_id    TEXT,                     -- Pinecone vector ID

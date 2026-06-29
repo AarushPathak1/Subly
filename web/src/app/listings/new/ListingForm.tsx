@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UniversityCombobox } from "@/components/UniversityCombobox";
 import { createListing, updateListing, getPresignedUrl } from "@/lib/actions";
-import { ListingSchema } from "@/lib/schemas";
+import { ListingSchema, AMENITY_OPTIONS, UTILITY_OPTIONS, LEASE_TYPES, FURNISHED_OPTIONS } from "@/lib/schemas";
 import { capture } from "@/lib/posthog/client";
 
 const inputCls =
@@ -68,6 +68,10 @@ export interface ListingInitialValues {
   available_from?: string;
   available_to?: string;
   images?: string[];
+  amenities?: string[];
+  lease_type?: string;
+  furnished?: string;
+  utilities_included?: string[];
 }
 
 interface ListingFormProps {
@@ -86,6 +90,11 @@ export default function ListingForm({ onImagesChange, initialValues, mode = "cre
   const [uploading, setUploading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
+  const [leaseType, setLeaseType] = useState<string>(initialValues?.lease_type ?? "");
+  const [furnished, setFurnished] = useState<string>(initialValues?.furnished ?? "");
+
+  const initialAmenities = new Set(initialValues?.amenities ?? []);
+  const initialUtilities = new Set(initialValues?.utilities_included ?? []);
 
   const MAX_FILE_BYTES = 10 * 1024 * 1024;
   const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -332,7 +341,91 @@ export default function ListingForm({ onImagesChange, initialValues, mode = "cre
         </div>
       </div>
 
-      {/* Section 4 — Photos */}
+      {/* Section 4 — What's Included */}
+      <div>
+        <SectionHeader icon="pricing" title="What's Included" subtitle="Help renters understand the lease structure and what comes with it" />
+        <input type="hidden" name="lease_type" value={leaseType} />
+        <input type="hidden" name="furnished" value={furnished} />
+        <div className="space-y-6">
+          <div>
+            <label className={labelCls}>Lease type</label>
+            <div className="flex gap-2">
+              {(["whole_place", "private_room", "shared_room"] as const).map((v) => {
+                const labels: Record<string, string> = { whole_place: "Whole place", private_room: "Private room", shared_room: "Shared room" };
+                const selected = leaseType === v;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setLeaseType(selected ? "" : v)}
+                    className={`px-4 py-2 text-sm font-semibold rounded-xl border transition ${selected ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-700 border-slate-200 hover:border-indigo-300"}`}
+                  >
+                    {labels[v]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Furnished</label>
+            <div className="flex gap-2">
+              {(["furnished", "partially", "unfurnished"] as const).map((v) => {
+                const labels: Record<string, string> = { furnished: "Furnished", partially: "Partially", unfurnished: "Unfurnished" };
+                const selected = furnished === v;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setFurnished(selected ? "" : v)}
+                    className={`px-4 py-2 text-sm font-semibold rounded-xl border transition ${selected ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-700 border-slate-200 hover:border-indigo-300"}`}
+                  >
+                    {labels[v]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Amenities</label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {AMENITY_OPTIONS.map((a) => (
+                <label key={a} className="flex items-center gap-2 px-3 py-2 border border-slate-200 rounded-xl cursor-pointer text-sm text-slate-700 has-[:checked]:bg-indigo-50 has-[:checked]:border-indigo-400 transition">
+                  <input
+                    type="checkbox"
+                    name="amenities"
+                    value={a}
+                    defaultChecked={initialAmenities.has(a)}
+                    className="accent-indigo-600"
+                  />
+                  {a}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Utilities included</label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {UTILITY_OPTIONS.map((u) => (
+                <label key={u} className="flex items-center gap-2 px-3 py-2 border border-slate-200 rounded-xl cursor-pointer text-sm text-slate-700 has-[:checked]:bg-indigo-50 has-[:checked]:border-indigo-400 transition">
+                  <input
+                    type="checkbox"
+                    name="utilities_included"
+                    value={u}
+                    defaultChecked={initialUtilities.has(u)}
+                    className="accent-indigo-600"
+                  />
+                  {u}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 5 — Photos */}
       <div>
         <SectionHeader icon="photos" title="Photos" subtitle="Listings with photos get 3× more inquiries" />
 

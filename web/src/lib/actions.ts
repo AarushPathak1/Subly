@@ -104,6 +104,8 @@ export async function createListing(
   if (!token) return { error: "Not signed in" };
 
   const images = formData.getAll("images") as string[];
+  const amenities = formData.getAll("amenities") as string[];
+  const utilities_included = formData.getAll("utilities_included") as string[];
 
   const res = await fetch(`${GATEWAY}/api/listings/listings`, {
     method: "POST",
@@ -121,7 +123,10 @@ export async function createListing(
       available_to: parsed.data.available_to || undefined,
       bedrooms: parseInt(parsed.data.bedrooms, 10),
       bathrooms: parseFloat(parsed.data.bathrooms),
-      amenities: [],
+      amenities,
+      lease_type: parsed.data.lease_type || null,
+      furnished: parsed.data.furnished || null,
+      utilities_included,
       images,
     }),
   });
@@ -146,6 +151,8 @@ export async function updateListing(
   if (!token) return { error: "Not signed in" };
 
   const images = formData.getAll("images") as string[];
+  const amenities = formData.getAll("amenities") as string[];
+  const utilities_included = formData.getAll("utilities_included") as string[];
 
   const res = await fetch(`${GATEWAY}/api/listings/listings/${listingId}`, {
     method: "PATCH",
@@ -163,6 +170,10 @@ export async function updateListing(
       available_to: parsed.data.available_to || undefined,
       bedrooms: parseInt(parsed.data.bedrooms, 10),
       bathrooms: parseFloat(parsed.data.bathrooms),
+      amenities,
+      lease_type: parsed.data.lease_type || null,
+      furnished: parsed.data.furnished || null,
+      utilities_included,
       images,
     }),
   });
