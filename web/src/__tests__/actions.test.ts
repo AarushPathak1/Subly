@@ -203,13 +203,15 @@ describe("createCheckoutSession", () => {
 
     const result = await createCheckoutSession("conv-1");
     expect(result).toEqual({ url: "https://checkout.stripe.com/test" });
+    // Fix 6: sessions.create is now called with (sessionObj, { idempotencyKey })
     expect(mockStripeCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: "payment",
         line_items: expect.arrayContaining([
           expect.objectContaining({ price_data: expect.objectContaining({ unit_amount: 4900 }) }),
         ]),
-      })
+      }),
+      expect.objectContaining({ idempotencyKey: expect.any(String) })
     );
   });
 
@@ -271,7 +273,8 @@ describe("verifyAndConfirmMatch", () => {
   });
 
   it("verifies Stripe session and calls confirm endpoint on success", async () => {
-    mockStripeRetrieve.mockResolvedValueOnce({ payment_status: "paid" });
+    // Fix 1: metadata must include conversation_id matching the argument
+    mockStripeRetrieve.mockResolvedValueOnce({ payment_status: "paid", metadata: { conversation_id: "conv-1" } });
     mockFetch.mockResolvedValueOnce({ ok: true });
 
     const result = await verifyAndConfirmMatch("conv-1", "sess_123");
@@ -295,13 +298,15 @@ describe("verifyAndConfirmMatch", () => {
   });
 
   it("returns error when confirm endpoint fails", async () => {
-    mockStripeRetrieve.mockResolvedValueOnce({ payment_status: "paid" });
+    // Fix 1: include matching metadata so the metadata check passes before reaching the confirm call
+    mockStripeRetrieve.mockResolvedValueOnce({ payment_status: "paid", metadata: { conversation_id: "conv-1" } });
     mockFetch.mockResolvedValueOnce({ ok: false });
     expect(await verifyAndConfirmMatch("conv-1", "sess_123")).toEqual({ error: "Failed to confirm match" });
   });
 
   it("passes stripe_session_id in confirm body", async () => {
-    mockStripeRetrieve.mockResolvedValueOnce({ payment_status: "paid" });
+    // Fix 1: include matching metadata so the metadata check passes before reaching the confirm call
+    mockStripeRetrieve.mockResolvedValueOnce({ payment_status: "paid", metadata: { conversation_id: "conv-1" } });
     mockFetch.mockResolvedValueOnce({ ok: true });
 
     await verifyAndConfirmMatch("conv-1", "sess_123");

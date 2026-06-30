@@ -435,6 +435,10 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	if l.UtilitiesIncluded == nil {
 		l.UtilitiesIncluded = []string{}
 	}
+	if userID != l.UserID && (l.Status == "draft" || l.Status == "expired") {
+		http.NotFound(w, r)
+		return
+	}
 	if userID != l.UserID {
 		l.ScamScore = 0
 
@@ -452,6 +456,10 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeErr(w, r, http.StatusUnauthorized, fmt.Errorf("missing X-User-ID"))
+		return
+	}
 
 	var body struct {
 		Title             *string  `json:"title"`
@@ -628,14 +636,10 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		add("scam_score", 0)
 	}
 
-	// Build WHERE: match id, and if gateway provided X-User-ID enforce ownership
-	where := fmt.Sprintf("id = $%d", idx)
-	args = append(args, id)
-	idx++
-	if userID != "" {
-		where += fmt.Sprintf(" AND user_id = $%d", idx)
-		args = append(args, userID)
-	}
+	// Build WHERE: match id and enforce ownership unconditionally.
+	where := fmt.Sprintf("id = $%d AND user_id = $%d", idx, idx+1)
+	args = append(args, id, userID)
+	idx += 2
 
 	q := fmt.Sprintf("UPDATE listings SET %s WHERE %s",
 		joinStrings(setClauses, ", "), where)
@@ -931,7 +935,9 @@ func (s *server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	if renterID == userID {
 		col = "renter_read_at"
 	}
-	s.db.Exec(ctx, fmt.Sprintf(`UPDATE conversations SET %s = NOW() WHERE id = $1`, col), id)
+	if _, err := s.db.Exec(ctx, fmt.Sprintf(`UPDATE conversations SET %s = NOW() WHERE id = $1`, col), id); err != nil {
+		log.Error("failed to mark conversation as read", "conversation_id", id, "error", err)
+	}
 
 	rows, err := s.db.Query(ctx,
 		`SELECT id, conversation_id, sender_id, body, created_at, kind, viewing
@@ -1828,6 +1834,7 @@ func (s *server) handleListSaved(w http.ResponseWriter, r *http.Request) {
 		       l.lease_type, l.furnished, l.utilities_included, sl.created_at
 		FROM saved_listings sl
 		JOIN listings l ON l.id = sl.listing_id
+		JOIN users u ON u.id = l.user_id AND u.deleted_at IS NULL
 		WHERE sl.user_id = $1
 		ORDER BY sl.created_at DESC
 		LIMIT 200`, userID)

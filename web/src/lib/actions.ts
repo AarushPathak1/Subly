@@ -293,25 +293,28 @@ export async function createCheckoutSession(
   const fee = calculateMatchFee(conv.initial_rent_cents);
 
   const appUrl = process.env.APP_URL ?? "http://localhost:3000";
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    line_items: [
-      {
-        price_data: {
-          currency: "usd",
-          product_data: {
-            name: "Subly Match Confirmation",
-            description: `Sublease match for "${conv.listing_title}"`,
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "payment",
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: "Subly Match Confirmation",
+              description: `Sublease match for "${conv.listing_title}"`,
+            },
+            unit_amount: fee,
           },
-          unit_amount: fee,
+          quantity: 1,
         },
-        quantity: 1,
-      },
-    ],
-    success_url: `${appUrl}/messages/${conversationId}/confirmed?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${appUrl}/messages/${conversationId}`,
-    metadata: { conversation_id: conversationId, ...(user?.id ? { user_id: user.id } : {}) },
-  });
+      ],
+      success_url: `${appUrl}/messages/${conversationId}/confirmed?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appUrl}/messages/${conversationId}`,
+      metadata: { conversation_id: conversationId, ...(user?.id ? { user_id: user.id } : {}) },
+    },
+    { idempotencyKey: `checkout-${conversationId}-${user.id}` }
+  );
 
   return { url: session.url! };
 }
@@ -327,6 +330,9 @@ export async function verifyAndConfirmMatch(
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if (session.payment_status !== "paid") return { error: "Payment not completed" };
+    if (session.metadata?.conversation_id !== conversationId) {
+      return { error: "Payment session does not match this conversation" };
+    }
   } catch {
     return { error: "Could not verify payment" };
   }

@@ -459,6 +459,20 @@ app.post("/profile", requireAuth(), async (req, res) => {
     if (!userRows.length) return res.status(404).json({ error: "User not found" });
 
     const { vibe_text, university, max_rent_cents, min_bedrooms } = req.body;
+
+    if (typeof vibe_text !== "string" || vibe_text.length > 2000) {
+      return res.status(400).json({ error: "vibe_text must be a string of at most 2000 characters" });
+    }
+    if (typeof university !== "string" || university.length > 200) {
+      return res.status(400).json({ error: "university must be a string of at most 200 characters" });
+    }
+    if (!Number.isInteger(max_rent_cents) || max_rent_cents < 10000 || max_rent_cents > 5000000) {
+      return res.status(400).json({ error: "max_rent_cents must be an integer between 10000 and 5000000" });
+    }
+    if (!Number.isInteger(min_bedrooms) || min_bedrooms < 0 || min_bedrooms > 20) {
+      return res.status(400).json({ error: "min_bedrooms must be an integer between 0 and 20" });
+    }
+
     const { rows } = await db.query(
       `INSERT INTO user_profiles (user_id, vibe_text, university, max_rent_cents, min_bedrooms)
        VALUES ($1, $2, $3, $4, $5)

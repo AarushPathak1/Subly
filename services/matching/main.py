@@ -284,7 +284,7 @@ app = FastAPI(title="Subly Matching Service", lifespan=lifespan)
 
 
 class SearchRequest(BaseModel):
-    query: str
+    query: str = Field(..., max_length=500)
     university: Optional[str] = None
     top_k: int = Field(default=10, ge=1, le=100)
 
