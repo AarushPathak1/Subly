@@ -1,7 +1,8 @@
 import { requireEduVerified } from "@/lib/auth";
 import { auth } from "@clerk/nextjs/server";
 import { AppNav } from "@/components/AppNav";
-import { startConversation, fetchSavedListingIds, fetchReviewsForLister, fetchReviewSummary } from "@/lib/actions";
+import { startConversation, fetchSavedListingIds, fetchReviewsForLister, fetchReviewSummary, fetchUserProfile } from "@/lib/actions";
+import { ListerCredibilityPanel } from "@/components/ListerCredibilityPanel";
 import { SaveButton } from "@/components/SaveButton";
 import { ReviewsSection } from "@/components/ReviewsSection";
 import { ReportButton } from "@/components/ReportButton";
@@ -88,10 +89,11 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
   const listing: Listing = await res.json();
   const rent = `$${(listing.rent_cents / 100).toLocaleString()}/mo`;
   const isOwner = user.id === listing.user_id;
-  const [savedIds, reviews, reviewSummary] = await Promise.all([
+  const [savedIds, reviews, reviewSummary, listerProfile] = await Promise.all([
     isOwner ? Promise.resolve(new Set<string>()) : fetchSavedListingIds(),
     fetchReviewsForLister(listing.user_id),
     fetchReviewSummary({ lister_id: listing.user_id }),
+    fetchUserProfile(listing.user_id),
   ]);
   const summary = reviewSummary ?? { average: null, count: 0 };
   const listerReviews = reviewSummary ? reviews : [];
@@ -147,6 +149,16 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
               </div>
             </div>
 
+            {/* Lister credibility */}
+            <ListerCredibilityPanel
+              listerId={listing.user_id}
+              university={listerProfile?.university || listing.university_near || null}
+              memberSince={listerProfile?.member_since ?? null}
+              eduVerified={listerProfile !== null}
+              summary={summary}
+              showProfileLink={!isOwner}
+            />
+
             {/* Key stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
               <div className="bg-indigo-50 rounded-xl p-4">
@@ -180,12 +192,6 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
               <div>
                 <h2 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">Details</h2>
                 <dl className="space-y-2">
-                  {listing.university_near && (
-                    <div className="flex justify-between text-sm">
-                      <dt className="text-slate-500">Nearest university</dt>
-                      <dd className="font-semibold text-slate-900">{listing.university_near}</dd>
-                    </div>
-                  )}
                   {listing.available_to && (
                     <div className="flex justify-between text-sm">
                       <dt className="text-slate-500">Available until</dt>
@@ -253,22 +259,14 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
             {/* CTA */}
             <div className="flex flex-wrap gap-3 pt-6 border-t border-slate-100">
               {user.id !== listing.user_id && (
-                <>
-                  <form action={startConversation.bind(null, listing.id)}>
-                    <button
-                      type="submit"
-                      className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition"
-                    >
-                      Message lister
-                    </button>
-                  </form>
-                  <Link
-                    href={`/users/${listing.user_id}`}
-                    className="px-5 py-2.5 bg-indigo-50 text-indigo-700 text-sm font-semibold rounded-xl hover:bg-indigo-100 transition"
+                <form action={startConversation.bind(null, listing.id)}>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition"
                   >
-                    View lister profile
-                  </Link>
-                </>
+                    Message lister
+                  </button>
+                </form>
               )}
               <Link
                 href="/dashboard"
