@@ -8,6 +8,7 @@ import { ReportButton } from "@/components/ReportButton";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { leaseSummary } from "@/lib/leaseSummary";
+import { PhotoGallery } from "@/components/PhotoGallery";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -114,19 +115,7 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           {/* Image gallery */}
           {listing.images && listing.images.length > 0 ? (
-            <div className={`grid gap-1 ${listing.images.length === 1 ? "" : "grid-cols-2"}`}>
-              {listing.images.slice(0, 4).map((url, i) => (
-                <div
-                  key={i}
-                  className={`bg-slate-100 overflow-hidden ${
-                    listing.images.length === 1 ? "h-80" :
-                    i === 0 && listing.images.length >= 3 ? "row-span-2 h-full min-h-[320px]" : "h-40"
-                  }`}
-                >
-                  <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
-                </div>
-              ))}
-            </div>
+            <PhotoGallery images={listing.images} />
           ) : (
             <div className="h-56 bg-gradient-to-br from-indigo-900 to-slate-900 flex items-center justify-center">
               <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="opacity-30">
