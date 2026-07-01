@@ -26,12 +26,14 @@ export function AddressAutocompleteInput({
     const iv = setInterval(() => {
       attempts++;
       const G = (window as any).google;
-      if (G?.maps?.places?.Autocomplete) {
+      if (G?.maps?.places?.Autocomplete && G.maps.places.AutocompleteSessionToken) {
         clearInterval(iv);
+        let sessionToken = new G.maps.places.AutocompleteSessionToken();
         const ac = new G.maps.places.Autocomplete(inputRef.current!, {
           types: ["address"],
           fields: ["formatted_address", "geometry"],
           componentRestrictions: { country: countryRestriction },
+          sessionToken,
         });
         ac.addListener("place_changed", () => {
           const place = ac.getPlace();
@@ -42,6 +44,8 @@ export function AddressAutocompleteInput({
           if (inputRef.current) inputRef.current.value = place.formatted_address ?? "";
           setLat(String(place.geometry.location.lat()));
           setLng(String(place.geometry.location.lng()));
+          sessionToken = new G.maps.places.AutocompleteSessionToken();
+          ac.setOptions({ sessionToken });
         });
       } else if (attempts >= maxAttempts) {
         clearInterval(iv);

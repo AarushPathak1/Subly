@@ -13,6 +13,7 @@ function makeMockAutocomplete(place: object) {
       cb();
     }),
     getPlace: vi.fn(() => place),
+    setOptions: vi.fn(),
   };
   const Constructor = vi.fn(() => instance);
   return { Constructor, instance, triggerPlaceChanged: () => storedCb?.() };
@@ -20,14 +21,16 @@ function makeMockAutocomplete(place: object) {
 
 function installGoogleMock(place: object) {
   const { Constructor, instance } = makeMockAutocomplete(place);
+  const SessionTokenCtor = vi.fn(function SessionToken(this: any) { return this; });
   (window as any).google = {
     maps: {
       places: {
         Autocomplete: Constructor,
+        AutocompleteSessionToken: SessionTokenCtor,
       },
     },
   };
-  return { Constructor, instance };
+  return { Constructor, instance, SessionTokenCtor };
 }
 
 beforeEach(() => {
@@ -157,5 +160,46 @@ describe("AddressAutocompleteInput", () => {
     // Values should remain as the defaults since no geometry was provided
     expect(latInput!.value).toBe("1");
     expect(lngInput!.value).toBe("2");
+  });
+
+  it("passes a sessionToken to the Autocomplete constructor", async () => {
+    const { Constructor, SessionTokenCtor } = installGoogleMock({
+      formatted_address: "123 Main St",
+      geometry: { location: { lat: () => 30.28, lng: () => -97.73 } },
+    });
+
+    render(<AddressAutocompleteInput name="address" />);
+    await act(async () => { vi.runAllTimers(); });
+
+    expect(SessionTokenCtor).toHaveBeenCalled();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((Constructor.mock.calls[0] as any[])[1].sessionToken).toBeTruthy();
+  });
+
+  it("regenerates the sessionToken after place_changed", async () => {
+    const { instance, SessionTokenCtor } = installGoogleMock({
+      formatted_address: "123 Main St",
+      geometry: { location: { lat: () => 30.28, lng: () => -97.73 } },
+    });
+
+    render(<AddressAutocompleteInput name="address" />);
+    await act(async () => { vi.runAllTimers(); });
+
+    expect(SessionTokenCtor.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(instance.setOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionToken: expect.anything() })
+    );
+  });
+
+  it("does not regenerate the sessionToken when place_changed lacks geometry", async () => {
+    const { instance, SessionTokenCtor } = installGoogleMock({
+      formatted_address: "X",
+    });
+
+    render(<AddressAutocompleteInput name="address" />);
+    await act(async () => { vi.runAllTimers(); });
+
+    expect(SessionTokenCtor).toHaveBeenCalledTimes(1);
+    expect(instance.setOptions).not.toHaveBeenCalled();
   });
 });

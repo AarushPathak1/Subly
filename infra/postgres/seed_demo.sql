@@ -70,7 +70,7 @@ ON CONFLICT (user_id) DO NOTHING;
 -- scam_score = 0.042 = "Trusted" green badge
 -- status = 'active' = visible in browse and matching
 
-INSERT INTO listings (id, user_id, title, description, address, university_near, rent_cents, available_from, available_to, bedrooms, bathrooms, amenities, images, status, scam_score, view_count, created_at, updated_at)
+INSERT INTO listings (id, user_id, title, description, address, university_near, rent_cents, available_from, available_to, bedrooms, bathrooms, amenities, images, status, scam_score, view_count, created_at, updated_at, lat, lng, lease_type, furnished, utilities_included)
 VALUES
 
 -- Listing 1 (Maya's) — nice 1BR, your top match target
@@ -91,7 +91,8 @@ VALUES
     'https://images.unsplash.com/photo-1484154218962-a197022b5858?w=800&q=80'
   ],
   'active', 0.042, 47,
-  NOW() - INTERVAL '12 days', NOW() - INTERVAL '12 days'
+  NOW() - INTERVAL '12 days', NOW() - INTERVAL '12 days',
+  43.0742, -89.3947, 'whole_place', 'furnished', ARRAY['water','trash','wifi']
 ),
 
 -- Listing 2 (Jake's) — 2BR split, great value
@@ -111,7 +112,8 @@ VALUES
     'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800&q=80'
   ],
   'active', 0.038, 31,
-  NOW() - INTERVAL '20 days', NOW() - INTERVAL '20 days'
+  NOW() - INTERVAL '20 days', NOW() - INTERVAL '20 days',
+  43.0665, -89.4108, 'whole_place', 'furnished', ARRAY['water','trash','wifi']
 ),
 
 -- Listing 3 (Priya's) — premium 1BR, law school area
@@ -133,7 +135,8 @@ VALUES
     'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=800&q=80'
   ],
   'active', 0.051, 89,
-  NOW() - INTERVAL '7 days', NOW() - INTERVAL '7 days'
+  NOW() - INTERVAL '7 days', NOW() - INTERVAL '7 days',
+  43.0731, -89.3841, 'whole_place', 'furnished', ARRAY['water','trash','wifi']
 ),
 
 -- Listing 4 (Sam's) — 4BR house, budget-friendly
@@ -153,7 +156,8 @@ VALUES
     'https://images.unsplash.com/photo-1416331108676-a22ccb276e35?w=800&q=80'
   ],
   'active', 0.029, 22,
-  NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days'
+  NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days',
+  43.0603, -89.4155, 'whole_place', 'furnished', ARRAY['water','trash','wifi']
 )
 
 ON CONFLICT (id) DO NOTHING;

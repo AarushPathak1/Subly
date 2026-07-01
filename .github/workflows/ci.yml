@@ -245,6 +245,10 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   # JOB 7: Schema drift check
   #
+  # NOTE: This check does not catch columns that were dropped from init.sql but
+  # still exist on volumes provisioned before the drop. When removing a column,
+  # always write a migrate_drop_*.sql file that drops it with IF EXISTS.
+  #
   # init.sql is meant to already contain every change the migrate_*.sql files
   # make (all of them use IF NOT EXISTS / idempotent DDL), so applying the
   # migrations on top of a fresh init.sql should be a no-op. This job builds
