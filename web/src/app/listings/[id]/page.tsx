@@ -11,6 +11,7 @@ import { notFound } from "next/navigation";
 import { leaseSummary } from "@/lib/leaseSummary";
 import { PhotoGallery } from "@/components/PhotoGallery";
 import { ListingMap } from "@/components/ListingMap";
+import { shouldRenderMap } from "@/lib/listingMap";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
