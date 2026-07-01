@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { AppNav } from "@/components/AppNav";
 import Link from "next/link";
 import { NewListingClient } from "./NewListingClient";
+import { GoogleMapsScript } from "@/components/GoogleMapsScript";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -47,6 +48,7 @@ export default async function NewListingPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-slate-50 to-violet-50">
+      <GoogleMapsScript />
       <AppNav active="new-listing" />
 
       {/* Colored banner */}

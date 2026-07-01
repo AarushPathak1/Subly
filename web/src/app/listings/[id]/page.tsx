@@ -10,6 +10,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { leaseSummary } from "@/lib/leaseSummary";
 import { PhotoGallery } from "@/components/PhotoGallery";
+import { ListingMap } from "@/components/ListingMap";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -34,6 +35,8 @@ interface Listing {
   lease_type?: string;
   furnished?: string;
   utilities_included?: string[];
+  lat?: number;
+  lng?: number;
 }
 
 const LEASE_LABELS: Record<string, string> = {
@@ -206,6 +209,13 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
               </div>
 
             </div>
+
+            {listing.lat != null && listing.lng != null && (
+              <div className="mb-8">
+                <h2 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">Location</h2>
+                <ListingMap lat={listing.lat} lng={listing.lng} address={listing.address} />
+              </div>
+            )}
 
             {/* What's Included */}
             {(listing.lease_type || listing.furnished || (listing.utilities_included && listing.utilities_included.length > 0) || (listing.amenities && listing.amenities.length > 0)) && (

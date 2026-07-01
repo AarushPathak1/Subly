@@ -4,6 +4,7 @@ import { AppNav } from "@/components/AppNav";
 import { notFound, redirect } from "next/navigation";
 import { NewListingClient } from "../../new/NewListingClient";
 import type { ListingInitialValues } from "../../new/ListingForm";
+import { GoogleMapsScript } from "@/components/GoogleMapsScript";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -25,6 +26,8 @@ interface Listing {
   lease_type?: string;
   furnished?: string;
   utilities_included?: string[];
+  lat?: number;
+  lng?: number;
 }
 
 export default async function EditListingPage({ params }: { params: { id: string } }) {
@@ -61,10 +64,13 @@ export default async function EditListingPage({ params }: { params: { id: string
     lease_type: listing.lease_type ?? "",
     furnished: listing.furnished ?? "",
     utilities_included: listing.utilities_included ?? [],
+    lat: listing.lat != null ? String(listing.lat) : undefined,
+    lng: listing.lng != null ? String(listing.lng) : undefined,
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-slate-50 to-violet-50">
+      <GoogleMapsScript />
       <AppNav active="my-listings" />
 
       <div className="bg-gradient-to-r from-violet-900 via-indigo-900 to-slate-900 px-6 py-10">

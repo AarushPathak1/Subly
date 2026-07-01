@@ -42,7 +42,7 @@ func TestValidateListingFields_TableDriven(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := validateListingFields(c.title, c.description, c.address, c.rentCents, c.bedrooms, c.bathrooms, c.availableFrom, c.availableTo, "", "", nil, nil)
+			got := validateListingFields(c.title, c.description, c.address, c.rentCents, c.bedrooms, c.bathrooms, c.availableFrom, c.availableTo, "", "", nil, nil, nil, nil)
 			if got != c.wantCode {
 				t.Errorf("expected %q, got %q", c.wantCode, got)
 			}
@@ -230,6 +230,88 @@ func TestIntegration_HandleUpdate_InvalidRentCents_Returns400(t *testing.T) {
 	db.QueryRow(context.Background(), `SELECT rent_cents FROM listings WHERE id = $1`, listingID).Scan(&rentCents)
 	if rentCents != 120000 {
 		t.Errorf("expected rent_cents to remain unchanged at 120000, got %d", rentCents)
+	}
+}
+
+// ── validateListingFields lat/lng unit tests ─────────────────────────────────
+
+func TestValidateListingFields_LatLngBothNil_OK(t *testing.T) {
+	got := validateListingFields(
+		"A Nice Place To Live", "", "123 Main Street",
+		120000, 2, 1.5, "", "", "", "",
+		nil, nil,
+		nil, nil,
+	)
+	if got != "" {
+		t.Errorf("expected no error, got %q", got)
+	}
+}
+
+func TestValidateListingFields_LatOnly_Fails(t *testing.T) {
+	lat := 30.28
+	got := validateListingFields(
+		"A Nice Place To Live", "", "123 Main Street",
+		120000, 2, 1.5, "", "", "", "",
+		nil, nil,
+		&lat, nil, // lat present, lng absent
+	)
+	if got != "invalid_lat_lng" {
+		t.Errorf("expected invalid_lat_lng, got %q", got)
+	}
+}
+
+func TestValidateListingFields_LngOnly_Fails(t *testing.T) {
+	lng := -97.73
+	got := validateListingFields(
+		"A Nice Place To Live", "", "123 Main Street",
+		120000, 2, 1.5, "", "", "", "",
+		nil, nil,
+		nil, &lng, // lat absent, lng present
+	)
+	if got != "invalid_lat_lng" {
+		t.Errorf("expected invalid_lat_lng, got %q", got)
+	}
+}
+
+func TestValidateListingFields_LatOutOfRange_Fails(t *testing.T) {
+	lat := 91.0
+	lng := 0.0
+	got := validateListingFields(
+		"A Nice Place To Live", "", "123 Main Street",
+		120000, 2, 1.5, "", "", "", "",
+		nil, nil,
+		&lat, &lng,
+	)
+	if got != "invalid_lat_lng" {
+		t.Errorf("expected invalid_lat_lng for lat=91, got %q", got)
+	}
+}
+
+func TestValidateListingFields_LngOutOfRange_Fails(t *testing.T) {
+	lat := 30.28
+	lng := 200.0
+	got := validateListingFields(
+		"A Nice Place To Live", "", "123 Main Street",
+		120000, 2, 1.5, "", "", "", "",
+		nil, nil,
+		&lat, &lng,
+	)
+	if got != "invalid_lat_lng" {
+		t.Errorf("expected invalid_lat_lng for lng=200, got %q", got)
+	}
+}
+
+func TestValidateListingFields_LatLngInRange_OK(t *testing.T) {
+	lat := 30.28
+	lng := -97.73
+	got := validateListingFields(
+		"A Nice Place To Live", "", "123 Main Street",
+		120000, 2, 1.5, "", "", "", "",
+		nil, nil,
+		&lat, &lng,
+	)
+	if got != "" {
+		t.Errorf("expected no error for valid lat/lng, got %q", got)
 	}
 }
 

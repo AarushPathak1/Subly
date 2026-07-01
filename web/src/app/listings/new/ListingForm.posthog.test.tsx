@@ -53,7 +53,7 @@ const validValues = {
 async function fillForm() {
   await userEvent.type(screen.getByPlaceholderText(/sunny 2br/i), validValues.title);
   await userEvent.type(screen.getByPlaceholderText(/tell renters/i), validValues.description);
-  await userEvent.type(screen.getByPlaceholderText(/123 college ave/i), validValues.address);
+  await userEvent.type(screen.getByPlaceholderText(/start typing an address/i), validValues.address);
   await userEvent.type(screen.getByPlaceholderText(/ut austin, ucla/i), validValues.university_near);
   await userEvent.type(screen.getByPlaceholderText(/1,200/i), validValues.rent);
 

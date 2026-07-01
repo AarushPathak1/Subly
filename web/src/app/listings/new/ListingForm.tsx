@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UniversityCombobox } from "@/components/UniversityCombobox";
+import { AddressAutocompleteInput } from "@/components/AddressAutocompleteInput";
 import { createListing, updateListing, getPresignedUrl } from "@/lib/actions";
 import { ListingSchema, AMENITY_OPTIONS, UTILITY_OPTIONS, LEASE_TYPES, FURNISHED_OPTIONS } from "@/lib/schemas";
 import { capture } from "@/lib/posthog/client";
@@ -72,6 +73,8 @@ export interface ListingInitialValues {
   lease_type?: string;
   furnished?: string;
   utilities_included?: string[];
+  lat?: string;
+  lng?: string;
 }
 
 interface ListingFormProps {
@@ -254,19 +257,15 @@ export default function ListingForm({ onImagesChange, initialValues, mode = "cre
         <div className="space-y-5">
           <div>
             <label className={labelCls}>Street address</label>
-            <input
+            <AddressAutocompleteInput
               name="address"
-              type="text"
-              placeholder="123 College Ave, Austin, TX 78701"
               defaultValue={initialValues?.address}
+              defaultLat={initialValues?.lat}
+              defaultLng={initialValues?.lng}
               className={inputCls}
+              placeholder="Start typing an address..."
+              error={fieldErrors.address}
             />
-            {fieldErrors.address && (
-              <p className={fieldErrorCls}>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="#ef4444" strokeWidth="1.2"/><path d="M6 4v2.5M6 8.5h.01" stroke="#ef4444" strokeWidth="1.2" strokeLinecap="round"/></svg>
-                {fieldErrors.address}
-              </p>
-            )}
           </div>
           <div>
             <label className={labelCls}>Nearest university</label>

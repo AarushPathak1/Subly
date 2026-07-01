@@ -42,6 +42,8 @@ export const ListingSchema = z.object({
   bathrooms: z.string().min(1),
   lease_type: z.enum(LEASE_TYPES).optional().or(z.literal("")).default(""),
   furnished: z.enum(FURNISHED_OPTIONS).optional().or(z.literal("")).default(""),
+  lat: z.string().optional().default(""),
+  lng: z.string().optional().default(""),
 });
 
 export type ListingFormValues = z.infer<typeof ListingSchema>;

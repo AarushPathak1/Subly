@@ -38,6 +38,8 @@ type Listing struct {
 	AvailableTo    string    `json:"available_to,omitempty"`
 	Bedrooms       int       `json:"bedrooms"`
 	Bathrooms      float64   `json:"bathrooms"`
+	Lat            *float64  `json:"lat,omitempty"` // WGS84 latitude, nil for legacy rows
+	Lng            *float64  `json:"lng,omitempty"` // WGS84 longitude, nil for legacy rows
 	Amenities         []string `json:"amenities"`
 	LeaseType         string   `json:"lease_type"`
 	Furnished         string   `json:"furnished"`
@@ -216,7 +218,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	const selectCols = `SELECT l.id, l.user_id, l.title, l.description, l.address, l.university_near,
 	              l.rent_cents, l.available_from::text, l.available_to::text, l.bedrooms, l.bathrooms,
 	              l.amenities, l.images, l.status, l.scam_score, l.view_count, l.created_at, l.updated_at,
-	              l.lease_type, l.furnished, l.utilities_included
+	              l.lease_type, l.furnished, l.utilities_included, l.lat, l.lng
 	              FROM listings l JOIN users u ON u.id = l.user_id`
 
 	userID := r.URL.Query().Get("user_id")
@@ -249,11 +251,12 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 		var description, universityNear, availableTo sql.NullString
 		var lType, furn sql.NullString
 		var utils []string
+		var latRaw, lngRaw sql.NullFloat64
 		if err := rows.Scan(&l.ID, &l.UserID, &l.Title, &description, &l.Address,
 			&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
 			&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
 			&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt,
-			&lType, &furn, &utils); err != nil {
+			&lType, &furn, &utils, &latRaw, &lngRaw); err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
@@ -264,6 +267,8 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 		if l.UtilitiesIncluded == nil {
 			l.UtilitiesIncluded = []string{}
 		}
+		if latRaw.Valid { v := latRaw.Float64; l.Lat = &v }
+		if lngRaw.Valid { v := lngRaw.Float64; l.Lng = &v }
 		if r.Header.Get("X-User-ID") != l.UserID {
 			l.ScamScore = 0
 		}
@@ -285,6 +290,7 @@ func validateListingFields(
 	availableFrom, availableTo string,
 	leaseType, furnished string,
 	amenities, utilitiesIncluded []string,
+	lat, lng *float64,
 ) string {
 	if rentCents < 10000 || rentCents > 5000000 {
 		return "invalid_rent_cents"
@@ -329,6 +335,15 @@ func validateListingFields(
 			return "invalid_utilities_included"
 		}
 	}
+	// lat and lng must be both present or both absent
+	if (lat == nil) != (lng == nil) {
+		return "invalid_lat_lng"
+	}
+	if lat != nil {
+		if *lat < -90 || *lat > 90 || *lng < -180 || *lng > 180 {
+			return "invalid_lat_lng"
+		}
+	}
 	return ""
 }
 
@@ -345,7 +360,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if code := validateListingFields(body.Title, body.Description, body.Address, body.RentCents, body.Bedrooms, body.Bathrooms, body.AvailableFrom, body.AvailableTo, body.LeaseType, body.Furnished, body.Amenities, body.UtilitiesIncluded); code != "" {
+	if code := validateListingFields(body.Title, body.Description, body.Address, body.RentCents, body.Bedrooms, body.Bathrooms, body.AvailableFrom, body.AvailableTo, body.LeaseType, body.Furnished, body.Amenities, body.UtilitiesIncluded, body.Lat, body.Lng); code != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": code})
 		return
 	}
@@ -367,12 +382,13 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO listings
 		   (user_id, title, description, address, university_near,
 		    rent_cents, available_from, available_to, bedrooms, bathrooms,
-		    amenities, lease_type, furnished, utilities_included, images, status)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'draft')
+		    amenities, lease_type, furnished, utilities_included, images, lat, lng, status)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'draft')
 		 RETURNING id`,
 		userID, body.Title, body.Description, body.Address, body.UniversityNear,
 		body.RentCents, body.AvailableFrom, availableTo,
 		body.Bedrooms, body.Bathrooms, body.Amenities, leaseTypeVal, furnishedVal, body.UtilitiesIncluded, body.Images,
+		body.Lat, body.Lng,
 	).Scan(&id)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, err)
@@ -398,6 +414,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	var description, universityNear, availableTo sql.NullString
 	var leaseType, furnished sql.NullString
 	var utilitiesIncluded []string
+	var latRaw, lngRaw sql.NullFloat64
 	err := s.db.QueryRow(r.Context(),
 		`WITH bumped AS (
 		    UPDATE listings
@@ -408,14 +425,14 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 		    RETURNING id, user_id, title, description, address, university_near,
 		              rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
 		              amenities, images, status, scam_score, view_count, created_at, updated_at,
-		              lease_type, furnished, utilities_included
+		              lease_type, furnished, utilities_included, lat, lng
 		)
 		SELECT * FROM bumped
 		UNION ALL
 		SELECT id, user_id, title, description, address, university_near,
 		       rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
 		       amenities, images, status, scam_score, view_count, created_at, updated_at,
-		       lease_type, furnished, utilities_included
+		       lease_type, furnished, utilities_included, lat, lng
 		  FROM listings
 		 WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM bumped)
 		 LIMIT 1`, id, userID,
@@ -423,7 +440,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 		&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
 		&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
 		&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt,
-		&leaseType, &furnished, &utilitiesIncluded)
+		&leaseType, &furnished, &utilitiesIncluded, &latRaw, &lngRaw)
 	if err != nil {
 		writeErr(w, r, http.StatusNotFound, err)
 		return
@@ -435,6 +452,8 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	if l.UtilitiesIncluded == nil {
 		l.UtilitiesIncluded = []string{}
 	}
+	if latRaw.Valid { v := latRaw.Float64; l.Lat = &v }
+	if lngRaw.Valid { v := lngRaw.Float64; l.Lng = &v }
 	if userID != l.UserID && (l.Status == "draft" || l.Status == "expired") {
 		http.NotFound(w, r)
 		return
@@ -477,6 +496,8 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		LeaseType         *string  `json:"lease_type"`
 		Furnished         *string  `json:"furnished"`
 		UtilitiesIncluded []string `json:"utilities_included"`
+		Lat               *float64 `json:"lat"`
+		Lng               *float64 `json:"lng"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, r, http.StatusBadRequest, err)
@@ -554,7 +575,7 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	newAmenities := body.Amenities
 
-	if code := validateListingFields(newTitle, newDescription, newAddress, newRentCents, newBedrooms, newBathrooms, newAvailableFrom, newAvailableTo, newLeaseType, newFurnished, newAmenities, newUtilitiesIncluded); code != "" {
+	if code := validateListingFields(newTitle, newDescription, newAddress, newRentCents, newBedrooms, newBathrooms, newAvailableFrom, newAvailableTo, newLeaseType, newFurnished, newAmenities, newUtilitiesIncluded, body.Lat, body.Lng); code != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": code})
 		return
 	}
@@ -625,6 +646,12 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if body.UtilitiesIncluded != nil {
 		add("utilities_included", body.UtilitiesIncluded)
 	}
+	if body.Lat != nil {
+		add("lat", *body.Lat)
+	}
+	if body.Lng != nil {
+		add("lng", *body.Lng)
+	}
 
 	// A trust-relevant edit invalidates the existing scam score and trust
 	// badge — force the listing back to draft (even if it was active/paused/
@@ -674,17 +701,18 @@ func (s *server) fetchListingForEmbedding(ctx context.Context, id string) (Listi
 	var description, universityNear, availableTo sql.NullString
 	var leaseType, furnished sql.NullString
 	var utilitiesIncluded []string
+	var latRaw, lngRaw sql.NullFloat64
 	err := s.db.QueryRow(ctx,
 		`SELECT id, user_id, title, description, address, university_near,
 		        rent_cents, available_from::text, available_to::text, bedrooms, bathrooms,
 		        amenities, images, status, scam_score, view_count, created_at, updated_at,
-		        lease_type, furnished, utilities_included
+		        lease_type, furnished, utilities_included, lat, lng
 		   FROM listings WHERE id = $1`, id,
 	).Scan(&l.ID, &l.UserID, &l.Title, &description, &l.Address,
 		&universityNear, &l.RentCents, &l.AvailableFrom, &availableTo,
 		&l.Bedrooms, &l.Bathrooms, &l.Amenities, &l.Images,
 		&l.Status, &l.ScamScore, &l.ViewCount, &l.CreatedAt, &l.UpdatedAt,
-		&leaseType, &furnished, &utilitiesIncluded)
+		&leaseType, &furnished, &utilitiesIncluded, &latRaw, &lngRaw)
 	if err != nil {
 		return Listing{}, err
 	}
@@ -695,6 +723,8 @@ func (s *server) fetchListingForEmbedding(ctx context.Context, id string) (Listi
 	if l.UtilitiesIncluded == nil {
 		l.UtilitiesIncluded = []string{}
 	}
+	if latRaw.Valid { v := latRaw.Float64; l.Lat = &v }
+	if lngRaw.Valid { v := lngRaw.Float64; l.Lng = &v }
 	return l, nil
 }
 
@@ -1831,7 +1861,7 @@ func (s *server) handleListSaved(w http.ResponseWriter, r *http.Request) {
 		       l.rent_cents, l.available_from::text, l.available_to::text,
 		       l.bedrooms, l.bathrooms, l.amenities, l.images,
 		       l.status, l.scam_score, l.view_count, l.created_at, l.updated_at,
-		       l.lease_type, l.furnished, l.utilities_included, sl.created_at
+		       l.lease_type, l.furnished, l.utilities_included, l.lat, l.lng, sl.created_at
 		FROM saved_listings sl
 		JOIN listings l ON l.id = sl.listing_id
 		JOIN users u ON u.id = l.user_id AND u.deleted_at IS NULL
@@ -1850,11 +1880,12 @@ func (s *server) handleListSaved(w http.ResponseWriter, r *http.Request) {
 		var description, universityNear, availableTo sql.NullString
 		var lType, furn sql.NullString
 		var utils []string
+		var latRaw, lngRaw sql.NullFloat64
 		if err := rows.Scan(&sl.ID, &sl.UserID, &sl.Title, &description, &sl.Address,
 			&universityNear, &sl.RentCents, &sl.AvailableFrom, &availableTo,
 			&sl.Bedrooms, &sl.Bathrooms, &sl.Amenities, &sl.Images,
 			&sl.Status, &sl.ScamScore, &sl.ViewCount, &sl.CreatedAt, &sl.UpdatedAt,
-			&lType, &furn, &utils, &sl.SavedAt); err != nil {
+			&lType, &furn, &utils, &latRaw, &lngRaw, &sl.SavedAt); err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
@@ -1865,6 +1896,8 @@ func (s *server) handleListSaved(w http.ResponseWriter, r *http.Request) {
 		if sl.UtilitiesIncluded == nil {
 			sl.UtilitiesIncluded = []string{}
 		}
+		if latRaw.Valid { v := latRaw.Float64; sl.Lat = &v }
+		if lngRaw.Valid { v := lngRaw.Float64; sl.Lng = &v }
 		if userID != sl.UserID {
 			sl.ScamScore = 0
 		}

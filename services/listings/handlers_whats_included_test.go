@@ -39,7 +39,7 @@ func TestValidateListingFields_InvalidLeaseType(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := validateListingFields(title, desc, addr, rent, beds, baths, from, to, c.leaseType, "", nil, nil)
+			got := validateListingFields(title, desc, addr, rent, beds, baths, from, to, c.leaseType, "", nil, nil, nil, nil)
 			if got != c.wantCode {
 				t.Errorf("lease_type=%q: expected %q, got %q", c.leaseType, c.wantCode, got)
 			}
@@ -66,7 +66,7 @@ func TestValidateListingFields_InvalidFurnished(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := validateListingFields(title, desc, addr, rent, beds, baths, from, to, "", c.furnished, nil, nil)
+			got := validateListingFields(title, desc, addr, rent, beds, baths, from, to, "", c.furnished, nil, nil, nil, nil)
 			if got != c.wantCode {
 				t.Errorf("furnished=%q: expected %q, got %q", c.furnished, c.wantCode, got)
 			}
@@ -114,7 +114,7 @@ func TestValidateListingFields_AmenitiesBounds(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := validateListingFields(title, desc, addr, rent, beds, baths, from, to, "", "", c.ams, nil)
+			got := validateListingFields(title, desc, addr, rent, beds, baths, from, to, "", "", c.ams, nil, nil, nil)
 			if got != c.wantCode {
 				t.Errorf("expected %q, got %q", c.wantCode, got)
 			}
@@ -159,7 +159,7 @@ func TestValidateListingFields_UtilitiesBounds(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := validateListingFields(title, desc, addr, rent, beds, baths, from, to, "", "", nil, c.utils)
+			got := validateListingFields(title, desc, addr, rent, beds, baths, from, to, "", "", nil, c.utils, nil, nil)
 			if got != c.wantCode {
 				t.Errorf("expected %q, got %q", c.wantCode, got)
 			}

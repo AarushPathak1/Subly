@@ -128,6 +128,8 @@ export async function createListing(
       furnished: parsed.data.furnished || null,
       utilities_included,
       images,
+      lat: parsed.data.lat ? parseFloat(parsed.data.lat) : null,
+      lng: parsed.data.lng ? parseFloat(parsed.data.lng) : null,
     }),
   });
 
@@ -175,6 +177,8 @@ export async function updateListing(
       furnished: parsed.data.furnished,
       utilities_included,
       images,
+      lat: parsed.data.lat ? parseFloat(parsed.data.lat) : null,
+      lng: parsed.data.lng ? parseFloat(parsed.data.lng) : null,
     }),
   });
 
