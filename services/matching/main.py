@@ -126,18 +126,19 @@ def _fetch_listing_details(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id::text, scam_score, title, address, images, available_from::text
+                """SELECT id::text, scam_score, title, address, images, available_from::text, available_to::text
                    FROM listings WHERE id = ANY(%s::uuid[])""",
                 (listing_ids,),
             )
             for row in cur.fetchall():
-                lid, scam_score, title, address, images, available_from = row
+                lid, scam_score, title, address, images, available_from, available_to = row
                 scam_scores[lid] = float(scam_score)
                 listing_details[lid] = {
                     "title": title,
                     "address": address,
                     "image_url": images[0] if images else None,
                     "available_from": available_from,
+                    "available_to": available_to,
                 }
     finally:
         release_db(conn)
@@ -307,6 +308,7 @@ class MatchResult(BaseModel):
     address: Optional[str] = None
     image_url: Optional[str] = None
     available_from: Optional[str] = None   # ISO date (YYYY-MM-DD)
+    available_to: Optional[str] = None     # ISO date (YYYY-MM-DD)
 
 
 @app.get("/healthz")
@@ -361,6 +363,7 @@ async def get_matches(user_id: str, x_user_id: Optional[str] = Header(default=No
             address=listing_details.get(m["id"], {}).get("address"),
             image_url=listing_details.get(m["id"], {}).get("image_url"),
             available_from=listing_details.get(m["id"], {}).get("available_from"),
+            available_to=listing_details.get(m["id"], {}).get("available_to"),
         )
         for m in results["matches"]
     ]

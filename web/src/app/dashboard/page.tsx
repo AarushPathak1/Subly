@@ -5,6 +5,7 @@ import { AppNav } from "@/components/AppNav";
 import { NonEduGate } from "@/components/NonEduGate";
 import { SaveButton } from "@/components/SaveButton";
 import { fetchSavedListingIds } from "@/lib/actions";
+import { leaseSummary } from "@/lib/leaseSummary";
 
 const GATEWAY = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
 
@@ -20,6 +21,7 @@ interface MatchResult {
   address: string | null;
   image_url: string | null;
   available_from: string | null;
+  available_to: string | null;
 }
 
 async function getMatches(userId: string, token: string): Promise<MatchResult[]> {
@@ -71,6 +73,9 @@ function MatchCard({ match, isSaved }: { match: MatchResult; isSaved: boolean })
   const title = match.title ?? "Sublease listing";
   const subtitle = match.address || university;
   const availableLabel = formatAvailableFrom(match.available_from);
+  const lease = match.rent_cents != null && match.available_from != null
+    ? leaseSummary({ rent_cents: match.rent_cents, available_from: match.available_from, available_to: match.available_to ?? undefined })
+    : null;
   const isHighRisk = match.scam_score > 0.7;
   const riskColor = match.scam_score > 0.7 ? "text-red-500" : match.scam_score > 0.4 ? "text-amber-500" : "text-emerald-500";
   const trustLabel = match.scam_score > 0.7 ? "High Risk" : match.scam_score > 0.4 ? "Review" : "Trusted";
@@ -127,10 +132,11 @@ function MatchCard({ match, isSaved }: { match: MatchResult; isSaved: boolean })
           <div>
             <p className="text-base font-extrabold text-slate-900">{rent}</p>
             <p className="text-xs text-slate-400">{beds} bed · {baths} bath</p>
-            {availableLabel && (
-              <p className="text-xs font-semibold text-indigo-600 mt-0.5">
-                {availableLabel}
-              </p>
+            {lease && (
+              <p className="text-xs font-semibold text-indigo-600 mt-0.5">{lease}</p>
+            )}
+            {!lease && availableLabel && (
+              <p className="text-xs font-semibold text-indigo-600 mt-0.5">{availableLabel}</p>
             )}
           </div>
         </div>

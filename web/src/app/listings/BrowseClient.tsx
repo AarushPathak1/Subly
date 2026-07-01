@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import { SaveButton } from "@/components/SaveButton";
+import { leaseSummary } from "@/lib/leaseSummary";
 
 interface Listing {
   id: string;
@@ -11,6 +12,7 @@ interface Listing {
   university_near: string;
   rent_cents: number;
   available_from: string;
+  available_to?: string;
   bedrooms: number;
   bathrooms: number;
   images: string[];
@@ -20,6 +22,7 @@ interface Listing {
 
 function ListingCard({ listing, isSaved }: { listing: Listing; isSaved: boolean }) {
   const rent = `$${(listing.rent_cents / 100).toLocaleString()}/mo`;
+  const lease = leaseSummary({ rent_cents: listing.rent_cents, available_from: listing.available_from, available_to: listing.available_to });
   const isHighRisk = listing.scam_score > 0.7;
   const trustColor = listing.scam_score > 0.7 ? "text-red-500" : listing.scam_score > 0.4 ? "text-amber-500" : "text-emerald-500";
   const trustLabel = listing.scam_score > 0.7 ? "High Risk" : listing.scam_score > 0.4 ? "Review" : "Trusted";
@@ -73,6 +76,7 @@ function ListingCard({ listing, isSaved }: { listing: Listing; isSaved: boolean 
           <div>
             <p className="text-base font-extrabold text-slate-900">{rent}</p>
             <p className="text-xs text-slate-400">{listing.bedrooms}bd · {listing.bathrooms}ba</p>
+            <p className="text-xs text-indigo-600 font-semibold mt-0.5">{lease}</p>
           </div>
           <div className="flex items-center gap-1.5">
             <span className={`w-1.5 h-1.5 rounded-full ${listing.scam_score > 0.7 ? "bg-red-500" : listing.scam_score > 0.4 ? "bg-amber-500" : "bg-emerald-500"}`} />

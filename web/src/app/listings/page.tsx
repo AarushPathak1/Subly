@@ -14,6 +14,7 @@ interface Listing {
   university_near: string;
   rent_cents: number;
   available_from: string;
+  available_to?: string;
   bedrooms: number;
   bathrooms: number;
   images: string[];
