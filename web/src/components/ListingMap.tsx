@@ -1,11 +1,11 @@
 interface ListingMapProps {
-  lat: number;
-  lng: number;
   address: string;
+  lat?: number | null;
+  lng?: number | null;
   heightPx?: number;
 }
 
-export function ListingMap({ lat, lng, address, heightPx = 300 }: ListingMapProps) {
+export function ListingMap({ address, lat, lng, heightPx = 300 }: ListingMapProps) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   if (!key) {
     return (
@@ -14,7 +14,11 @@ export function ListingMap({ lat, lng, address, heightPx = 300 }: ListingMapProp
       </div>
     );
   }
-  const src = `https://www.google.com/maps/embed/v1/place?key=${key}&q=${lat},${lng}&zoom=15`;
+  // Prefer precise coordinates; fall back to address string for legacy listings
+  const q = lat != null && lng != null
+    ? `${lat},${lng}`
+    : encodeURIComponent(address);
+  const src = `https://www.google.com/maps/embed/v1/place?key=${key}&q=${q}&zoom=15`;
   return (
     <iframe
       title={`Map of ${address}`}

@@ -36,6 +36,16 @@ describe("ListingMap", () => {
     expect(iframe!.title).toContain("123 Main St");
   });
 
+  it("falls back to address-based embed when lat/lng are absent", () => {
+    render(<ListingMap address="423 W Mifflin St, Madison, WI" />);
+
+    const iframe = screen.getByTitle(/423 W Mifflin St/i);
+    expect(iframe).toHaveAttribute(
+      "src",
+      `https://www.google.com/maps/embed/v1/place?key=TEST_KEY&q=${encodeURIComponent("423 W Mifflin St, Madison, WI")}&zoom=15`
+    );
+  });
+
   it("renders fallback when API key is unset", () => {
     delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 

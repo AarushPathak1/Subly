@@ -210,10 +210,10 @@ export default async function ListingDetailPage({ params }: { params: { id: stri
 
             </div>
 
-            {listing.lat != null && listing.lng != null && (
+            {listing.address && (
               <div className="mb-8">
                 <h2 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">Location</h2>
-                <ListingMap lat={listing.lat} lng={listing.lng} address={listing.address} />
+                <ListingMap address={listing.address} lat={listing.lat} lng={listing.lng} />
               </div>
             )}
 
