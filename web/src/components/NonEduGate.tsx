@@ -1,13 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useClerk } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import { InviteModal } from "./InviteModal";
 import { AppNavUI } from "./AppNavUI";
 
 export function NonEduGate({ email }: { email: string | null }) {
   const [open, setOpen] = useState(false);
   const { signOut } = useClerk();
+  const router = useRouter();
+
+  // After Clerk's sign-in redirect the JWT is sometimes absent on the first SSR
+  // render, causing a false gate. If the signed-in email is already .edu, refresh
+  // once so the server re-renders with the established session cookie.
+  useEffect(() => {
+    if (email?.endsWith(".edu")) {
+      router.refresh();
+    }
+  }, [email, router]);
 
   return (
     <div className="min-h-screen bg-slate-50">
