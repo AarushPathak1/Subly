@@ -1,7 +1,8 @@
 import { requireEduVerified } from "@/lib/auth";
-import { fetchConversation, fetchMessages } from "@/lib/actions";
+import { fetchConversation, fetchMessages, fetchReviewEligibility } from "@/lib/actions";
 import { AppNav } from "@/components/AppNav";
 import { ThreadClient } from "./ThreadClient";
+import { ReviewPrompt } from "./ReviewPrompt";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -17,6 +18,11 @@ export default async function ThreadPage({ params }: { params: { id: string } })
 
   const isLister = user.id === conversation.lister_id;
   const otherUserId = isLister ? conversation.renter_id : conversation.lister_id;
+
+  const isRenter = user.id === conversation.renter_id;
+  const isConfirmed = !!conversation.confirmed_at;
+  const eligibility = isRenter && isConfirmed ? await fetchReviewEligibility(params.id) : null;
+  const showReviewPrompt = !!eligibility?.eligible;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -62,6 +68,13 @@ export default async function ThreadPage({ params }: { params: { id: string } })
           />
         </div>
       </div>
+
+      {showReviewPrompt && (
+        <ReviewPrompt
+          conversationId={params.id}
+          listerName={conversation.other_email}
+        />
+      )}
     </div>
   );
 }

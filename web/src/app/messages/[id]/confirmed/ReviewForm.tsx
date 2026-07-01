@@ -12,7 +12,7 @@ function StarIcon({ filled }: { filled: boolean }) {
   );
 }
 
-export function ReviewForm({ conversationId }: { conversationId: string }) {
+export function ReviewForm({ conversationId, onSuccess }: { conversationId: string; onSuccess?: () => void }) {
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [body, setBody] = useState("");
@@ -37,6 +37,7 @@ export function ReviewForm({ conversationId }: { conversationId: string }) {
       } else if ("toast" in result) {
         setSubmitted(true);
         capture("review_submitted", { conversation_id: conversationId, rating });
+        onSuccess?.();
       }
     });
   }
