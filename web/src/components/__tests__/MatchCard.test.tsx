@@ -46,16 +46,14 @@ describe("MatchCard", () => {
     expect(screen.queryByText(/view listing/i)).toBeNull();
   });
 
-  it("does not render university label on top of the photo", () => {
+  it("renders university name in the card body below the title", () => {
     render(<MatchCard match={baseMatch} isSaved={false} />);
-    // University should not appear as an overlay (address shows as subtitle instead)
-    // The badge text only appears in the gradient no-image branch
-    expect(screen.queryByText("University of Wisconsin - Madison")).toBeNull();
+    expect(screen.getByText("University of Wisconsin - Madison")).toBeInTheDocument();
   });
 
   it("renders university badge on the no-image gradient placeholder", () => {
     render(<MatchCard match={{ ...baseMatch, image_url: null }} isSaved={false} />);
-    expect(screen.getByText("University of Wisconsin - Madison")).toBeInTheDocument();
+    expect(screen.getAllByText("University of Wisconsin - Madison").length >= 1).toBe(true);
   });
 
   it("renders the score badge", () => {
@@ -66,5 +64,21 @@ describe("MatchCard", () => {
   it("renders trust label", () => {
     render(<MatchCard match={baseMatch} isSaved={false} />);
     expect(screen.getByText("Trusted")).toBeInTheDocument();
+  });
+
+  it("renders beds/baths in compact bd·ba format", () => {
+    render(<MatchCard match={baseMatch} isSaved={false} />);
+    expect(screen.getByText(/2bd · 1ba/)).toBeInTheDocument();
+  });
+
+  it("does not render the high-risk warning banner in the card body", () => {
+    render(<MatchCard match={{ ...baseMatch, scam_score: 0.9 }} isSaved={false} />);
+    expect(screen.queryByText(/proceed with caution/i)).toBeNull();
+    expect(screen.getByText("High Risk")).toBeInTheDocument();
+  });
+
+  it("does not render the street address as a subtitle", () => {
+    render(<MatchCard match={baseMatch} isSaved={false} />);
+    expect(screen.queryByText(/118 N Frances St/)).toBeNull();
   });
 });
