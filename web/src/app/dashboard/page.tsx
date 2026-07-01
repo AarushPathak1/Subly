@@ -57,7 +57,7 @@ function ScoreBadge({ score }: { score: number }) {
     pct >= 60 ? "bg-indigo-100 text-indigo-700" :
     "bg-slate-100 text-slate-600";
   return (
-    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${color}`}>
+    <span className={`text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap shrink-0 ${color}`}>
       {pct}% match
     </span>
   );
@@ -135,8 +135,8 @@ function MatchCard({ match, isSaved }: { match: MatchResult; isSaved: boolean })
             {lease && (
               <p className="text-xs font-semibold text-indigo-600 mt-0.5">{lease}</p>
             )}
-            {!lease && availableLabel && (
-              <p className="text-xs font-semibold text-indigo-600 mt-0.5">{availableLabel}</p>
+            {availableLabel && (
+              <p className="text-xs text-slate-500 mt-0.5">{availableLabel}</p>
             )}
           </div>
         </div>

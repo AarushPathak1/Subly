@@ -20,9 +20,21 @@ interface Listing {
   status: string;
 }
 
+function formatAvailableFrom(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  const currentYear = new Date().getFullYear();
+  const opts: Intl.DateTimeFormatOptions =
+    d.getFullYear() === currentYear
+      ? { month: "short", day: "numeric" }
+      : { month: "short", day: "numeric", year: "numeric" };
+  return `Available ${d.toLocaleDateString("en-US", opts)}`;
+}
+
 function ListingCard({ listing, isSaved }: { listing: Listing; isSaved: boolean }) {
   const rent = `$${(listing.rent_cents / 100).toLocaleString()}/mo`;
   const lease = leaseSummary({ rent_cents: listing.rent_cents, available_from: listing.available_from, available_to: listing.available_to });
+  const availableLabel = formatAvailableFrom(listing.available_from);
   const isHighRisk = listing.scam_score > 0.7;
   const trustColor = listing.scam_score > 0.7 ? "text-red-500" : listing.scam_score > 0.4 ? "text-amber-500" : "text-emerald-500";
   const trustLabel = listing.scam_score > 0.7 ? "High Risk" : listing.scam_score > 0.4 ? "Review" : "Trusted";
@@ -77,6 +89,7 @@ function ListingCard({ listing, isSaved }: { listing: Listing; isSaved: boolean 
             <p className="text-base font-extrabold text-slate-900">{rent}</p>
             <p className="text-xs text-slate-400">{listing.bedrooms}bd · {listing.bathrooms}ba</p>
             <p className="text-xs text-indigo-600 font-semibold mt-0.5">{lease}</p>
+            {availableLabel && <p className="text-xs text-slate-500 mt-0.5">{availableLabel}</p>}
           </div>
           <div className="flex items-center gap-1.5">
             <span className={`w-1.5 h-1.5 rounded-full ${listing.scam_score > 0.7 ? "bg-red-500" : listing.scam_score > 0.4 ? "bg-amber-500" : "bg-emerald-500"}`} />
