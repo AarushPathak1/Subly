@@ -337,14 +337,6 @@ app.post("/verify-edu", requireAuth(), async (req, res) => {
     // Soft-deleted accounts cannot re-verify — they stay locked until the 30-day
     // purge worker runs. Return 403 so the client shows an honest error instead of
     // a silent 200 that leaves deleted_at intact and /validate still returning 404.
-    const { rows: existing } = await db.query(
-      "SELECT deleted_at FROM users WHERE clerk_id = $1",
-      [userId]
-    );
-    if (existing.length > 0 && existing[0].deleted_at !== null) {
-      return res.status(403).json({ error: "This account has been deleted." });
-    }
-
     const clerkUser = await clerkClient.users.getUser(userId);
     const primaryEmail = clerkUser.emailAddresses?.find(
       (e) => e.id === clerkUser.primaryEmailAddressId
@@ -355,14 +347,28 @@ app.post("/verify-edu", requireAuth(), async (req, res) => {
     }
 
     const email = primaryEmail.emailAddress.toLowerCase();
+
+    // Check for soft-deleted account by email (covers re-signup with a new Clerk ID)
+    const { rows: existing } = await db.query(
+      "SELECT deleted_at FROM users WHERE email = $1",
+      [email]
+    );
+    if (existing.length > 0 && existing[0].deleted_at !== null) {
+      return res.status(403).json({ error: "This account has been deleted." });
+    }
+
     const isEdu = email.endsWith(".edu");
     const university = isEdu ? lookupUniversity(email) : null;
 
+    // Conflict on email so that re-signup with a new Clerk ID updates the existing row
     await db.query(
       `INSERT INTO users (clerk_id, email, edu_verified, university)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (clerk_id) DO UPDATE
-         SET email = $2, edu_verified = $3, university = $4, updated_at = NOW()`,
+       ON CONFLICT (email) DO UPDATE
+         SET clerk_id = EXCLUDED.clerk_id,
+             edu_verified = EXCLUDED.edu_verified,
+             university = EXCLUDED.university,
+             updated_at = NOW()`,
       [userId, email, isEdu, university]
     );
 
